@@ -61,9 +61,11 @@ final class AppState: ObservableObject {
         self.autoOpenAfterApproval = UserDefaults.standard.object(forKey: Keys.autoOpenAfterApproval) as? Bool ?? true
         self.autoOpenDuration = UserDefaults.standard.object(forKey: Keys.autoOpenDuration) as? Double ?? 5.0
         self.recentActivity = ActivityStore.shared.fetchRecent()
-        let todayItems = ActivityStore.shared.fetchToday()
-        self.todaySessionIds = Set(todayItems.compactMap { $0.sessionId })
-        self.todaySummary = ActivityStats.todaySummary(items: todayItems)
+        Task { @MainActor [self] in
+            let todayItems = await ActivityStore.shared.fetchToday()
+            self.todaySessionIds = Set(todayItems.compactMap { $0.sessionId })
+            self.todaySummary = ActivityStats.todaySummary(items: todayItems)
+        }
     }
 
     func presentApproval(request: HookRequest, server: HookServer) {

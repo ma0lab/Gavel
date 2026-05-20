@@ -6,6 +6,7 @@ struct StatsView: View {
     @State private var period: ActivityPeriod = .day
     @State private var buckets: [StatBucket] = []
     @State private var projects: [ProjectStat] = []
+    @State private var reloadTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -131,8 +132,13 @@ struct StatsView: View {
     // MARK: - Data
 
     private func reload() {
-        let items = ActivityStore.shared.fetchSince(period.rangeStart)
-        buckets  = ActivityStats.buckets(items: items, period: period)
-        projects = ActivityStats.projectBreakdown(items: items)
+        reloadTask?.cancel()
+        let p = period
+        reloadTask = Task { @MainActor in
+            let items = await ActivityStore.shared.fetchSince(p.rangeStart)
+            guard !Task.isCancelled else { return }
+            buckets  = ActivityStats.buckets(items: items, period: p)
+            projects = ActivityStats.projectBreakdown(items: items)
+        }
     }
 }

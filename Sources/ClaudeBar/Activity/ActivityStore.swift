@@ -6,6 +6,7 @@ final class ActivityStore {
     static let shared = ActivityStore()
 
     private var db: OpaquePointer?
+    private var dbPath: String = ""
     private static let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     private init() { open() }
@@ -16,6 +17,7 @@ final class ActivityStore {
             .appendingPathComponent("ClaudeBar")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let path = dir.appendingPathComponent("activity.db").path
+        dbPath = path
         guard sqlite3_open(path, &db) == SQLITE_OK else { return }
         exec("PRAGMA journal_mode=WAL")
         exec("PRAGMA synchronous=NORMAL")
@@ -57,17 +59,31 @@ final class ActivityStore {
         query("SELECT * FROM activity ORDER BY timestamp DESC LIMIT ?", doubles: [], texts: [], limit: limit)
     }
 
-    func fetchToday() -> [ActivityItem] {
-        fetchSince(Calendar.current.startOfDay(for: Date()))
+    func fetchToday() async -> [ActivityItem] {
+        await fetchSince(Calendar.current.startOfDay(for: Date()))
     }
 
-    func fetchSince(_ from: Date) -> [ActivityItem] {
-        var stmt: OpaquePointer?
-        let sql = "SELECT * FROM activity WHERE timestamp >= ? ORDER BY timestamp DESC"
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_double(stmt, 1, from.timeIntervalSinceReferenceDate)
-        return collectRows(stmt)
+    func fetchSince(_ from: Date) async -> [ActivityItem] {
+        let path = dbPath
+        let ts = from.timeIntervalSinceReferenceDate
+        return await Task.detached(priority: .utility) {
+            // Open a separate read-only connection — WAL mode supports concurrent readers
+            var readDb: OpaquePointer?
+            guard sqlite3_open_v2(path, &readDb,
+                                  SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK
+            else { return [] }
+            defer { sqlite3_close(readDb) }
+            let sql = "SELECT * FROM activity WHERE timestamp >= ? ORDER BY timestamp DESC"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(readDb, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_double(stmt, 1, ts)
+            var result: [ActivityItem] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                if let item = Self.decodeRow(stmt) { result.append(item) }
+            }
+            return result
+        }.value
     }
 
     func clearAll() {
@@ -100,7 +116,9 @@ final class ActivityStore {
         return result
     }
 
-    private func decode(_ stmt: OpaquePointer?) -> ActivityItem? {
+    private func decode(_ stmt: OpaquePointer?) -> ActivityItem? { Self.decodeRow(stmt) }
+
+    nonisolated static func decodeRow(_ stmt: OpaquePointer?) -> ActivityItem? {
         guard let idStr = col(stmt, 0),
               let id = UUID(uuidString: idStr),
               let toolName = col(stmt, 3),
@@ -118,7 +136,7 @@ final class ActivityStore {
         )
     }
 
-    private func col(_ stmt: OpaquePointer?, _ index: Int32) -> String? {
+    nonisolated static func col(_ stmt: OpaquePointer?, _ index: Int32) -> String? {
         guard let ptr = sqlite3_column_text(stmt, index) else { return nil }
         return String(cString: ptr)
     }
