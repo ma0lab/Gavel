@@ -4,16 +4,16 @@ struct MenuBarView: View {
     @ObservedObject private var state = AppState.shared
     let onShowApproval: () -> Void
     let onOpenSetup: () -> Void
-    let onOpenSettings: () -> Void
-    let onOpenLog: () -> Void
+    let onOpenStats: () -> Void
 
     @State private var instructionTarget: SessionInfo?
     @State private var sessionsExpanded = false
+    @State private var selectedSessionId: String?
 
-    private static let sessionLimit = 4
+    private static let sessionLimit = 5
 
-    private var allowCount: Int { state.recentActivity.filter { $0.decision == .allow }.count }
-    private var denyCount: Int  { state.recentActivity.filter { $0.decision == .deny }.count  }
+    private var allowCount: Int { state.todaySummary.allow }
+    private var denyCount: Int  { state.todaySummary.deny  }
 
     var body: some View {
         Group {
@@ -34,9 +34,19 @@ struct MenuBarView: View {
             if !state.displayedSessions.isEmpty {
                 Divider()
                 sessionsSection
+            } else if !state.isSetupComplete {
+                Divider()
+                Button("Setup Claude Code", action: onOpenSetup)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .padding(16)
             }
-            Divider()
-            footerBar
+        }
+        .onDisappear { selectedSessionId = nil }
+        .task(id: selectedSessionId) {
+            guard selectedSessionId != nil else { return }
+            try? await Task.sleep(for: .seconds(5))
+            withAnimation(.easeInOut(duration: 0.2)) { selectedSessionId = nil }
         }
     }
 
@@ -55,10 +65,20 @@ struct MenuBarView: View {
             }
             Spacer()
             if allowCount + denyCount > 0 {
-                HStack(spacing: 5) {
-                    statPill(allowCount, color: .green, icon: "checkmark")
-                    statPill(denyCount,  color: .red,   icon: "xmark")
+                Button(action: onOpenStats) {
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text("Today")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.tertiary)
+                        Text("\(allowCount + denyCount)")
+                            .font(.title3.weight(.bold).monospacedDigit())
+                            .foregroundStyle(.primary)
+                    }
                 }
+                .buttonStyle(.plain)
+                .focusEffectDisabled()
+                .padding(.trailing, 4)
+                .help("View today's details")
             }
         }
         .padding(.horizontal, 16)
@@ -154,14 +174,18 @@ struct MenuBarView: View {
     private func sessionRow(_ session: SessionInfo) -> some View {
         let pending = pendingCount(for: session)
         let done = isDone(session)
-        Button {
-            if pending > 0 {
-                onShowApproval()
-            } else {
-                state.clearCompletion(for: session)
-                instructionTarget = session
-            }
-        } label: {
+        let isSelected = selectedSessionId == session.id
+
+        HStack(spacing: 0) {
+            // 左アクセントバー（中央から上下に展開）
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(Color.accentColor)
+                .frame(width: 3)
+                .scaleEffect(y: isSelected && pending == 0 ? 1 : 0.001, anchor: .center)
+                .animation(.spring(duration: 0.32, bounce: 0.35), value: isSelected)
+                .padding(.vertical, 8)
+                .padding(.leading, 6)
+
             HStack(spacing: 10) {
                 Image(systemName: pending > 0 ? "bell.fill" : "terminal.fill")
                     .font(.system(size: 11))
@@ -170,82 +194,78 @@ struct MenuBarView: View {
                     .background((pending > 0 ? Color.orange : Color.green).opacity(0.12),
                                 in: RoundedRectangle(cornerRadius: 7))
 
-                VStack(alignment: .leading, spacing: 1) {
-                    if let dir = session.workingDirectory {
-                        Text((dir as NSString).lastPathComponent)
-                            .font(.callout.weight(.medium))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                        Text(dir.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
-                            .font(.caption2.monospaced())
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.head)
-                    } else {
-                        Text(session.id.prefix(24) + "…")
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                    }
-                }
+                Text(session.workingDirectory?.projectName ?? String(session.id.prefix(12)) + "…")
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
 
                 Spacer()
 
-                if pending > 0 {
+                if isSelected && pending == 0 {
+                    HStack(spacing: 4) {
+                        inlineAction("terminal", help: "Focus terminal") {
+                            let dir = session.workingDirectory
+                            Task.detached {
+                                if let d = dir { await focusSession(dir: d) } else { await focusAnyTerminal() }
+                            }
+                        }
+                        inlineAction("paperplane.fill", help: "Send message") {
+                            state.clearCompletion(for: session)
+                            instructionTarget = session
+                        }
+                        inlineAction("xmark", help: "Dismiss session") {
+                            selectedSessionId = nil
+                            state.dismissSession(session)
+                        }
+                    }
+                    .padding(.trailing, 10)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                } else if pending > 0 {
                     Text("\(pending)")
                         .font(.caption2.weight(.bold).monospacedDigit())
                         .foregroundStyle(.white)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
                         .background(.orange, in: Capsule())
+                        .padding(.trailing, 14)
                 } else if done {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.green)
-                } else {
-                    Image(systemName: "text.cursor")
-                        .font(.caption2)
-                        .foregroundStyle(.quaternary)
+                        .padding(.trailing, 14)
                 }
             }
-            .padding(.horizontal, 14)
+            .padding(.leading, 8)
             .padding(.vertical, 7)
-            .background(
-                pending > 0 ? Color.orange.opacity(0.07) :
-                done        ? Color.green.opacity(0.06)  : Color.clear,
-                in: Rectangle()
-            )
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .background(
+            pending > 0 ? Color.orange.opacity(0.07) :
+            isSelected  ? Color.accentColor.opacity(0.08) :
+            done        ? Color.green.opacity(0.06) : Color.clear,
+            in: Rectangle()
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if pending > 0 { onShowApproval() }
+            else {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    selectedSessionId = session.id
+                }
+            }
+        }
     }
 
-    // MARK: - Footer
-
-    private var footerBar: some View {
-        HStack(spacing: 6) {
-            if state.isSetupComplete {
-                Button("Disconnect") {
-                    try? ClaudeSettingsManager.uninstall()
-                    AppState.shared.markSetupComplete()
-                }
-                .foregroundStyle(.red)
-                .buttonStyle(.bordered)
-            } else {
-                Button("Setup", action: onOpenSetup)
-                    .buttonStyle(.bordered)
-            }
-            Spacer()
-            Button("Log",      action: onOpenLog)
-            Button("Settings", action: onOpenSettings)
-            Button("Quit") { NSApplication.shared.terminate(nil) }
+    private func inlineAction(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 26, height: 26)
+                .background(.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .font(.callout)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.regularMaterial)
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .help(help)
     }
 
     // MARK: - Helpers
@@ -422,12 +442,9 @@ private struct InstructionForm: View {
             await MainActor.run {
                 isSending = false
                 switch result {
-                case .sent:
-                    onDone()
-                case .copiedOnly:
-                    statusMessage = "copied"
-                case .failed:
-                    statusMessage = "notfound"
+                case .sent:    onDone()
+                case .copiedOnly: statusMessage = "copied"
+                case .failed:  statusMessage = "notfound"
                 }
             }
         }

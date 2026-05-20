@@ -72,12 +72,27 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 Button("Clear activity") {
-                    state.recentActivity.removeAll()
+                    state.clearActivity()
                 }
                 .foregroundStyle(.secondary)
+                Button("View Log...") {
+                    MainWindowState.shared.selectedTab = .log
+                }
+            }
+
+            Section {
+                Button("Disconnect") {
+                    try? ClaudeSettingsManager.uninstall()
+                    state.markSetupComplete()
+                }
+                .foregroundStyle(.red)
+
+                Button("Quit ClaudeBar") {
+                    NSApplication.shared.terminate(nil)
+                }
+                .foregroundStyle(.red)
             }
         }
         .formStyle(.grouped)
-        .frame(width: 400, height: 380)
     }
 }
