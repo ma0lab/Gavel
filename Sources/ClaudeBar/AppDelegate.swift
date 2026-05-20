@@ -183,6 +183,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
         w.title = title
+        w.titleVisibility = .hidden
         w.center()
         w.isReleasedWhenClosed = false
         return w
