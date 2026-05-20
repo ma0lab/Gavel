@@ -34,7 +34,7 @@ struct SetupView: View {
                     install()
                 } label: {
                     HStack {
-                        if isInstalling { ProgressView().controlSize(.small) }
+                        if isInstalling { BrailleSpinner() }
                         Text(isInstalling ? "Installing..." : "Connect to Claude Code")
                     }
                     .frame(maxWidth: .infinity)
