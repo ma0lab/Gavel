@@ -20,8 +20,13 @@ guard var payload = (try? JSONSerialization.jsonObject(with: stdinData)) as? [St
 
 // PermissionRequest: output JSON to suppress Claude Code's native dialog.
 // PreToolUse handles the actual approval via ClaudeBar popup.
+// AskUserQuestion is excluded: its native selection UI lives inside the PermissionRequest
+// flow, so suppressing it would swallow the question entirely.
 if isPermissionRequest {
-    print("{\"hookSpecificOutput\":{\"hookEventName\":\"PermissionRequest\",\"decision\":{\"behavior\":\"allow\"}}}")
+    let prToolName = payload["tool_name"] as? String ?? ""
+    if prToolName != "AskUserQuestion" {
+        print("{\"hookSpecificOutput\":{\"hookEventName\":\"PermissionRequest\",\"decision\":{\"behavior\":\"allow\"}}}")
+    }
     exit(0)
 }
 
@@ -37,6 +42,35 @@ payload["request_id"] = "pending"
 let approvalTools: Set<String> = ["Bash", "Write", "Edit", "MultiEdit", "AskFollowupQuestion"]
 let toolName = payload["tool_name"] as? String ?? ""
 if hookType == "pre_tool_use" && !approvalTools.contains(toolName) {
+    // AskUserQuestion: notify ClaudeBar so it can show a question popup, then unblock.
+    if toolName == "AskUserQuestion" {
+        payload["hook_type"] = "ask_user_question"
+        payload["request_id"] = "pending"
+        if let sendData = try? JSONSerialization.data(withJSONObject: payload) {
+            let s = socket(AF_UNIX, SOCK_STREAM, 0)
+            if s >= 0 {
+                var addr = sockaddr_un()
+                addr.sun_family = sa_family_t(AF_UNIX)
+                let sunPathSize = MemoryLayout.size(ofValue: addr.sun_path)
+                var sunPath = addr.sun_path
+                socketPath.withCString { src in
+                    withUnsafeMutablePointer(to: &sunPath) { dst in
+                        UnsafeMutableRawPointer(dst).copyMemory(from: src, byteCount: min(strlen(src) + 1, sunPathSize))
+                    }
+                }
+                addr.sun_path = sunPath
+                let connected = withUnsafePointer(to: &addr) {
+                    $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                        connect(s, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+                    }
+                } == 0
+                if connected && sendFrame(s, sendData) {
+                    _ = readFrame(s) // consume ack
+                }
+                close(s)
+            }
+        }
+    }
     exit(0) // auto-approve: Read, Glob, Grep, MCP tools, etc.
 }
 
