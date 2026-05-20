@@ -242,6 +242,7 @@ struct MenuBarView: View {
             .padding(.leading, 8)
             .padding(.vertical, 7)
         }
+        .frame(height: 44)
         .background(
             pending > 0 ? Color.orange.opacity(0.07) :
             isSelected  ? Color.accentColor.opacity(0.08) :
