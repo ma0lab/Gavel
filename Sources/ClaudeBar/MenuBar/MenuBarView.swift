@@ -45,8 +45,10 @@ struct MenuBarView: View {
         .onDisappear { selectedSessionId = nil }
         .task(id: selectedSessionId) {
             guard selectedSessionId != nil else { return }
-            try? await Task.sleep(for: .seconds(5))
-            withAnimation(.easeInOut(duration: 0.2)) { selectedSessionId = nil }
+            do {
+                try await Task.sleep(for: .seconds(5))
+                withAnimation(.easeInOut(duration: 0.2)) { selectedSessionId = nil }
+            } catch {}
         }
     }
 
@@ -176,12 +178,15 @@ struct MenuBarView: View {
         let isSelected = selectedSessionId == session.id
 
         HStack(spacing: 0) {
-            // 左アクセントバー（中央から上下に展開）
+
             RoundedRectangle(cornerRadius: 1.5)
                 .fill(Color.accentColor)
                 .frame(width: 3)
-                .scaleEffect(y: isSelected && pending == 0 ? 1 : 0.001, anchor: .center)
-                .animation(.spring(duration: 0.32, bounce: 0.35), value: isSelected)
+                .scaleEffect(y: isSelected && pending == 0 ? 1 : 0, anchor: .center)
+                .animation(
+                    isSelected ? .spring(duration: 0.32, bounce: 0.35) : .easeOut(duration: 0.15),
+                    value: isSelected
+                )
                 .padding(.vertical, 8)
                 .padding(.leading, 6)
 
@@ -410,7 +415,7 @@ private struct InstructionForm: View {
                 } label: {
                     HStack(spacing: 5) {
                         if isSending {
-                            ProgressView().scaleEffect(0.7)
+                            BrailleSpinner()
                         } else {
                             Image(systemName: "paperplane.fill")
                         }
