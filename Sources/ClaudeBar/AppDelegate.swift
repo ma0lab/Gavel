@@ -92,10 +92,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             rootView: MenuBarView(
                 onShowApproval: { [weak self] in
                     self?.hideMenuPopover()
-                    ApprovalWindowController.shared.show(expanded: true)
+                    ApprovalWindowController.shared.show()
                 },
                 onOpenSetup:  { [weak self] in self?.openSetupWindow()           },
-                onOpenStats:  { [weak self] in self?.openMainWindow(tab: .stats) }
+                onOpenStats:  { [weak self] in self?.hideMenuPopover(); self?.openMainWindow(tab: .stats) }
             )
         )
         mp.contentViewController = hc
