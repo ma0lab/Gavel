@@ -19,6 +19,8 @@ enum TranscriptReader {
         var lines = chunk.components(separatedBy: "\n")
         if readSize < fileSize { lines.removeFirst() }
 
+        var foundFirstMessage = false
+
         for line in lines.reversed() {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty,
@@ -27,7 +29,16 @@ enum TranscriptReader {
             else { continue }
 
             let msg = obj["message"] as? [String: Any] ?? obj
-            guard (msg["role"] as? String) == "assistant",
+            let role = msg["role"] as? String
+
+            // If the most recent entry is not from the assistant, the transcript hasn't
+            // caught up to the current turn yet — don't show stale intent.
+            if !foundFirstMessage {
+                foundFirstMessage = true
+                if role != "assistant" { return nil }
+            }
+
+            guard role == "assistant",
                   let content = msg["content"] as? [[String: Any]] else { continue }
 
             // Found the last assistant message — extract text only from THIS message.

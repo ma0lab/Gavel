@@ -71,7 +71,8 @@ struct ApprovalView: View {
                                     intentLoadingSection
                                     Divider().padding(.horizontal, 18)
                                 case .none:
-                                    EmptyView()
+                                    intentSection(syntheticIntent(for: approval.request))
+                                    Divider().padding(.horizontal, 18)
                                 }
                             }
                             commandSection(approval)
@@ -318,6 +319,18 @@ struct ApprovalView: View {
             return (dir as NSString).lastPathComponent
         }
         return request.sessionId.map { "Session \(String($0.prefix(12)))…" } ?? ""
+    }
+
+    private func syntheticIntent(for request: HookRequest) -> String {
+        switch request.toolName?.lowercased() {
+        case "bash":                       return "Running 1 shell command…"
+        case "write":                      return "Writing 1 file…"
+        case "edit", "multiedit":          return "Editing 1 file…"
+        case "askfollowupquestion":        return "Asking a follow-up question…"
+        default:
+            if let name = request.toolName { return "Running \(name)…" }
+            return "Running tool…"
+        }
     }
 
     private func toolIcon(for name: String?) -> String {
