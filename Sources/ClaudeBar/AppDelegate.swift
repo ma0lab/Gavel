@@ -6,6 +6,7 @@ import Combine
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var menuPopover: NSPopover?
+    private var mainWindow: NSWindow?
     private var cancellable: AnyCancellable?
     private var approvalCancellable: AnyCancellable?
 
@@ -46,6 +47,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         button.image = NSImage(systemSymbolName: "terminal.fill", accessibilityDescription: "ClaudeBar")
         button.action = #selector(handleStatusBarClick)
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         button.target = self
         statusItem = item
 
@@ -87,21 +89,44 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         mp.animates = true
         mp.contentViewController = NSHostingController(
             rootView: MenuBarView(
-                onShowApproval: { [weak self, weak mp] in
+                onShowApproval: { [weak mp] in
                     mp?.performClose(nil)
                     ApprovalWindowController.shared.show()
                 },
-                onOpenSetup: { [weak self] in self?.openSetupWindow() },
-                onOpenSettings: { [weak self] in self?.openSettingsWindow() },
-                onOpenLog: { [weak self] in self?.openLogWindow() }
+                onOpenSetup:  { [weak self] in self?.openSetupWindow()           },
+                onOpenStats:  { [weak self] in self?.openMainWindow(tab: .stats) }
             )
         )
         menuPopover = mp
     }
 
     @objc private func handleStatusBarClick() {
-        toggleMenuPopover()
+        guard let event = NSApp.currentEvent else { return }
+        if event.type == .rightMouseUp {
+            menuPopover?.performClose(nil)
+            showContextMenu()
+        } else {
+            toggleMenuPopover()
+        }
     }
+
+    private func showContextMenu() {
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Statistics",     action: #selector(menuOpenStats),              keyEquivalent: "")
+        menu.addItem(withTitle: "Settings",       action: #selector(menuOpenSettings),           keyEquivalent: "")
+        menu.addItem(withTitle: "Activity Log",   action: #selector(menuOpenLog),               keyEquivalent: "")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Quit ClaudeBar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.items.forEach { $0.target = self }
+        // statusItem.menu を一時的にセットして表示後に nil に戻す（左クリックを維持するため）
+        statusItem?.menu = menu
+        statusItem?.button?.performClick(nil)
+        statusItem?.menu = nil
+    }
+
+    @objc private func menuOpenStats()    { openMainWindow(tab: .stats)    }
+    @objc private func menuOpenSettings() { openMainWindow(tab: .settings) }
+    @objc private func menuOpenLog()      { openMainWindow(tab: .log)      }
 
     private func toggleMenuPopover() {
         guard let mp = menuPopover, let button = statusItem?.button else { return }
@@ -120,17 +145,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func openSettingsWindow() {
-        let w = makeWindow(title: "Settings", size: NSSize(width: 400, height: 340))
-        w.contentView = NSHostingView(rootView: SettingsView())
-        w.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-    }
-
-    func openLogWindow() {
-        let w = makeWindow(title: "Activity Log", size: NSSize(width: 480, height: 360))
-        w.contentView = NSHostingView(rootView: LogView())
-        w.makeKeyAndOrderFront(nil)
+    func openMainWindow(tab: MainTab = .stats) {
+        if mainWindow == nil {
+            let w = makeWindow(title: "ClaudeBar", size: NSSize(width: 640, height: 556))
+            w.contentView = NSHostingView(rootView: MainWindowView())
+            mainWindow = w
+        }
+        MainWindowState.shared.selectedTab = tab
+        mainWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -147,39 +169,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return w
     }
 
-    private func makeDoneBadgeImage() -> NSImage {
-        let cfg = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
-            .applying(NSImage.SymbolConfiguration(paletteColors: [.labelColor]))
-        guard let terminal = NSImage(systemSymbolName: "terminal.fill", accessibilityDescription: nil)?
-            .withSymbolConfiguration(cfg) else { return NSImage() }
-
-        let tw = terminal.size.width
-        let th = terminal.size.height
-        let dot: CGFloat = 5.5
-        let canvas = NSSize(width: tw + dot * 0.4, height: th)
-
-        let result = NSImage(size: canvas, flipped: false) { _ in
-            terminal.draw(in: NSRect(origin: .zero, size: terminal.size))
-            let ctx = NSGraphicsContext.current!.cgContext
-            ctx.setFillColor(NSColor.systemGreen.cgColor)
-            ctx.fillEllipse(in: CGRect(x: tw - dot * 0.5, y: th - dot - 0.5, width: dot, height: dot))
-            return true
-        }
-        result.isTemplate = false
-        return result
-    }
-
     private func startBellAnimation(for button: NSButton) {
         guard bellTimer == nil else { return }
-        // アニメーション中に毎フレーム SF Symbol を再生成しないようキャッシュ
-        let termCfg = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
-            .applying(NSImage.SymbolConfiguration(paletteColors: [.labelColor]))
-        cachedTerminal = NSImage(systemSymbolName: "terminal.fill", accessibilityDescription: nil)?
-            .withSymbolConfiguration(termCfg)
-        let bellCfg = NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
-            .applying(NSImage.SymbolConfiguration(paletteColors: [.systemOrange]))
-        cachedBell = NSImage(systemSymbolName: "bell.fill", accessibilityDescription: nil)?
-            .withSymbolConfiguration(bellCfg)
+        cachedTerminal = Self.loadTerminalImage()
+        cachedBell = Self.loadBellImage()
 
         bellPhase = 0
         let timer = Timer(timeInterval: 0.08, repeats: true) { [weak self, weak button] _ in
@@ -203,71 +196,69 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         button.image = makeMenuBarImage(bellAngle: nil)
     }
 
+    private func makeDoneBadgeImage() -> NSImage {
+        guard let terminal = cachedTerminal ?? Self.loadTerminalImage() else { return NSImage() }
+        let tw = terminal.size.width
+        let th = terminal.size.height
+        let dot: CGFloat = 5.5
+        return composite(on: terminal) { ctx in
+            ctx.setFillColor(NSColor.systemGreen.cgColor)
+            ctx.fillEllipse(in: CGRect(x: tw - dot, y: th - dot, width: dot, height: dot))
+        }
+    }
+
     private func makeMenuBarImage(bellAngle: CGFloat?) -> NSImage {
+        guard let terminal = cachedTerminal ?? Self.loadTerminalImage() else { return NSImage() }
+
         guard let angle = bellAngle else {
-            let cfg = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
-            return NSImage(systemSymbolName: "terminal.fill", accessibilityDescription: nil)?
-                .withSymbolConfiguration(cfg) ?? NSImage()
+            return terminal
         }
 
-        let termCfg = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
-            .applying(NSImage.SymbolConfiguration(paletteColors: [.labelColor]))
-        guard let terminal = cachedTerminal ?? NSImage(systemSymbolName: "terminal.fill", accessibilityDescription: nil)?
-            .withSymbolConfiguration(termCfg) else { return NSImage() }
-
-        let bellCfg = NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
-            .applying(NSImage.SymbolConfiguration(paletteColors: [.systemOrange]))
-        guard let bell = cachedBell ?? NSImage(systemSymbolName: "bell.fill", accessibilityDescription: nil)?
-            .withSymbolConfiguration(bellCfg) else { return terminal }
+        guard let bell = cachedBell ?? Self.loadBellImage() else { return terminal }
 
         let tw = terminal.size.width
         let th = terminal.size.height
         let bw = bell.size.width
         let bh = bell.size.height
+        let pivotX = tw - bw * 0.3
+        let pivotY = th - 0.5
 
-        // ベルの吊り下げ点: ターミナルの右 60% 付近に重なる
-        let pivotX = tw * 0.62
-        let canvasW = tw + bw * 1.5   // 音波アーク分の余白
-        let canvasH = max(th, bh * 1.4)
-
-        let result = NSImage(size: NSSize(width: canvasW, height: canvasH), flipped: false) { _ in
-            terminal.draw(in: NSRect(x: 0, y: (canvasH - th) / 2, width: tw, height: th))
-
-            let ctx = NSGraphicsContext.current!.cgContext
-
-            let pivotY = canvasH * 0.90
-            // ベル中心 (音波の基点)
-            let bellCenter = CGPoint(x: pivotX, y: pivotY - bh * 0.5)
-
-            // 音波アーク: ベル右側に 2 本
-            let waves: [(CGFloat, CGFloat)] = [(bw * 0.85, 0.85), (bw * 1.45, 0.45)]
-            for (r, alpha) in waves {
-                ctx.setStrokeColor(NSColor.systemOrange.withAlphaComponent(alpha).cgColor)
-                ctx.setLineWidth(0.8)
-                ctx.setLineCap(.round)
-                ctx.beginPath()
-                ctx.addArc(center: bellCenter, radius: r,
-                           startAngle: -.pi * 0.32,
-                           endAngle:    .pi * 0.32,
-                           clockwise: false)
-                ctx.strokePath()
-            }
-
-            // ベル（回転あり）
+        return composite(on: terminal) { ctx in
             ctx.saveGState()
             ctx.translateBy(x: pivotX, y: pivotY)
             ctx.rotate(by: angle * .pi / 180)
             bell.draw(in: NSRect(x: -bw / 2, y: -bh, width: bw, height: bh))
             ctx.restoreGState()
+        }
+    }
 
+    private func composite(on terminal: NSImage, overlay: @escaping (CGContext) -> Void) -> NSImage {
+        let result = NSImage(size: terminal.size, flipped: false) { _ in
+            terminal.draw(in: NSRect(origin: .zero, size: terminal.size))
+            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+            overlay(ctx)
             return true
         }
         result.isTemplate = false
         return result
     }
 
+    private static func loadTerminalImage() -> NSImage? {
+        let cfg = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+        return NSImage(systemSymbolName: "terminal.fill", accessibilityDescription: nil)?
+            .withSymbolConfiguration(cfg)
+    }
+
+    private static func loadBellImage() -> NSImage? {
+        let cfg = NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [.systemOrange]))
+        return NSImage(systemSymbolName: "bell.fill", accessibilityDescription: nil)?
+            .withSymbolConfiguration(cfg)
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         Task { await HookServer.shared.stop() }
+        ActivityStore.shared.close()
         return .terminateNow
     }
 }
