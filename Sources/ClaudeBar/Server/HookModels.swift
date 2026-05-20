@@ -4,6 +4,7 @@ enum HookType: String, Codable, Sendable {
     case preToolUse = "pre_tool_use"
     case preToolUseNotify = "pre_tool_use_notify"
     case permissionRequest = "permission_request"
+    case askUserQuestion = "ask_user_question"
     case notification = "notification"
     case stop = "stop"
 }
@@ -84,6 +85,23 @@ struct SessionInfo: Identifiable, Sendable, Equatable {
         if let wd = workingDirectory, let own = self.workingDirectory, wd == own { return true }
         return false
     }
+}
+
+extension HookRequest {
+    var projectLabel: String {
+        if let dir = workingDirectory { return dir.projectName }
+        return sessionId.map { "Session \(String($0.prefix(12)))…" } ?? ""
+    }
+
+    var isDangerousCommand: Bool {
+        guard toolName == "Bash" else { return false }
+        let cmd = commandPreview
+        return Self.dangerousCommandRegex?.firstMatch(in: cmd, range: NSRange(cmd.startIndex..., in: cmd)) != nil
+    }
+
+    private static let dangerousCommandRegex = try? NSRegularExpression(
+        pattern: #"\b(rm|mv|dd|chmod|chown|sudo|truncate|shred)\b"#
+    )
 }
 
 extension CompletionItem {

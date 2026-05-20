@@ -11,6 +11,7 @@ enum IntentState: Sendable {
 struct PendingApproval: Sendable {
     let request: HookRequest
     let isBlocking: Bool
+    let isEnvWarning: Bool
     let respond: @Sendable (HookResponse) -> Void
     let allowAll: (@Sendable () -> Void)?  // non-blocking only: "2. Yes, allow all"
 }
@@ -29,11 +30,9 @@ final class AppState: ObservableObject {
     @Published var isServerRunning = false
     @Published var enableNativeNotifications: Bool
     @Published var intentState: IntentState = .none
-    @Published var approvalExpanded: Bool = false
-    @Published var autoOpenAfterApproval: Bool
-    @Published var autoOpenDuration: Double
-    private var lastQueueClearedTime: Date?
-
+    @Published var autoAllowEnabled: Bool
+    @Published var autoAllowRules: [AutoAllowRule]
+    @Published var pendingAskQuestion: HookRequest? = nil
     // Sessions shown in the dashboard: process-scan as primary, hook-only sessions as supplement
     var displayedSessions: [SessionInfo] {
         let scannedCwds = Set(scannedSessions.compactMap { $0.workingDirectory })
@@ -50,16 +49,21 @@ final class AppState: ObservableObject {
         static let isSetupComplete = "isSetupComplete"
         static let blockApprovals = "blockApprovals"
         static let enableNativeNotifications = "enableNativeNotifications"
-        static let autoOpenAfterApproval = "autoOpenAfterApproval"
-        static let autoOpenDuration = "autoOpenDuration"
+        static let autoAllowEnabled = "autoAllowEnabled"
+        static let autoAllowRules = "autoAllowRules"
     }
 
     private init() {
         self.isSetupComplete = UserDefaults.standard.bool(forKey: Keys.isSetupComplete)
         self.blockApprovals = UserDefaults.standard.bool(forKey: Keys.blockApprovals)
         self.enableNativeNotifications = UserDefaults.standard.bool(forKey: Keys.enableNativeNotifications)
-        self.autoOpenAfterApproval = UserDefaults.standard.object(forKey: Keys.autoOpenAfterApproval) as? Bool ?? true
-        self.autoOpenDuration = UserDefaults.standard.object(forKey: Keys.autoOpenDuration) as? Double ?? 5.0
+        self.autoAllowEnabled = UserDefaults.standard.bool(forKey: Keys.autoAllowEnabled)
+        if let data = UserDefaults.standard.data(forKey: Keys.autoAllowRules),
+           let rules = try? JSONDecoder().decode([AutoAllowRule].self, from: data) {
+            self.autoAllowRules = rules
+        } else {
+            self.autoAllowRules = AutoAllowRule.defaults
+        }
         self.recentActivity = ActivityStore.shared.fetchRecent()
         Task { @MainActor [self] in
             let todayItems = await ActivityStore.shared.fetchToday()
@@ -68,16 +72,15 @@ final class AppState: ObservableObject {
         }
     }
 
-    func presentApproval(request: HookRequest, server: HookServer) {
+    func presentApproval(request: HookRequest, server: HookServer, isEnvWarning: Bool = false) {
         registerSession(from: request)
         clearCompletion(sessionId: request.sessionId, workingDirectory: request.workingDirectory)
-        let approval = PendingApproval(request: request, isBlocking: true, respond: { response in
+        let approval = PendingApproval(request: request, isBlocking: true, isEnvWarning: isEnvWarning, respond: { response in
             Task { await server.resolve(requestId: response.requestId, with: response) }
         }, allowAll: nil)
         approvalQueue.append(approval)
         loadIntentIfNeeded(from: request)
-        let grace = autoOpenAfterApproval && isWithinGracePeriod()
-        ApprovalWindowController.shared.show(expanded: grace, keepingFocus: grace)
+        ApprovalWindowController.shared.show()
     }
 
     func trackToolUse(from request: HookRequest) {
@@ -88,6 +91,7 @@ final class AppState: ObservableObject {
         let approval = PendingApproval(
             request: request,
             isBlocking: false,
+            isEnvWarning: false,
             respond: { response in
                 let text = response.decision == .deny ? "3\n" : "1\n"
                 Task.detached { _ = await sendToSession(dir: dir, text: text) }
@@ -99,8 +103,7 @@ final class AppState: ObservableObject {
         approvalQueue.append(approval)
         loadIntentIfNeeded(from: request)
         if approvalQueue.count == 1 {
-            let grace = autoOpenAfterApproval && isWithinGracePeriod()
-            ApprovalWindowController.shared.show(expanded: grace, keepingFocus: grace)
+            ApprovalWindowController.shared.show()
         }
     }
 
@@ -210,8 +213,6 @@ final class AppState: ObservableObject {
 
     private func advanceQueue() {
         if approvalQueue.isEmpty {
-            lastQueueClearedTime = Date()
-            approvalExpanded = false
             ApprovalWindowController.shared.dismiss()
         } else {
             ApprovalWindowController.shared.show()
@@ -234,19 +235,61 @@ final class AppState: ObservableObject {
         }
     }
 
-    func isWithinGracePeriod() -> Bool {
-        guard let t = lastQueueClearedTime else { return false }
-        return Date().timeIntervalSince(t) <= autoOpenDuration
+    func setAutoAllowEnabled(_ value: Bool) {
+        autoAllowEnabled = value
+        UserDefaults.standard.set(value, forKey: Keys.autoAllowEnabled)
     }
 
-    func setAutoOpenAfterApproval(_ value: Bool) {
-        autoOpenAfterApproval = value
-        UserDefaults.standard.set(value, forKey: Keys.autoOpenAfterApproval)
+    func addAutoAllowRule(toolName: String, commandPattern: String? = nil) {
+        let name = toolName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, !autoAllowRules.contains(where: { $0.toolName == name }) else { return }
+        let pattern = commandPattern?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        autoAllowRules.append(AutoAllowRule(toolName: name, commandPattern: pattern))
+        saveAutoAllowRules()
     }
 
-    func setAutoOpenDuration(_ value: Double) {
-        autoOpenDuration = value
-        UserDefaults.standard.set(value, forKey: Keys.autoOpenDuration)
+    func removeAutoAllowRule(id: UUID) {
+        autoAllowRules.removeAll { $0.id == id }
+        saveAutoAllowRules()
+    }
+
+    func toggleAutoAllowRule(id: UUID) {
+        guard let idx = autoAllowRules.firstIndex(where: { $0.id == id }) else { return }
+        autoAllowRules[idx].isEnabled.toggle()
+        saveAutoAllowRules()
+    }
+
+    func saveAutoAllowRules() {
+        if let data = try? JSONEncoder().encode(autoAllowRules) {
+            UserDefaults.standard.set(data, forKey: Keys.autoAllowRules)
+        }
+    }
+
+    func matchesAutoAllowRule(_ request: HookRequest) -> Bool {
+        guard autoAllowEnabled, let toolName = request.toolName else { return false }
+        guard !needsEnvWarning(request) else { return false }
+        guard let rule = autoAllowRules.first(where: { $0.isEnabled && $0.toolName == toolName }) else { return false }
+        if let pattern = rule.commandPattern, !pattern.isEmpty {
+            let command = request.commandPreview
+            guard let regex = try? NSRegularExpression(pattern: pattern),
+                  regex.firstMatch(in: command, range: NSRange(command.startIndex..., in: command)) != nil else {
+                return false
+            }
+        }
+        return true
+    }
+
+    func needsEnvWarning(_ request: HookRequest) -> Bool {
+        guard request.toolName == "Read" else { return false }
+        guard let input = request.toolInputRaw,
+              let pathVal = input["file_path"],
+              case .string(let path) = pathVal else { return false }
+        return isEnvFilePath(path)
+    }
+
+    func logAutoAllow(_ request: HookRequest) {
+        registerSession(from: request)
+        addActivity(from: request, decision: .allow)
     }
 
     private func registerSession(from request: HookRequest) {
@@ -288,4 +331,17 @@ final class AppState: ObservableObject {
         if let sid = item.sessionId { todaySessionIds.insert(sid) }
         todaySummary = TodaySummary(allow: allow, deny: deny, sessions: todaySessionIds.count)
     }
+    func presentAskQuestion(from request: HookRequest) {
+        registerSession(from: request)
+        pendingAskQuestion = request
+        if pendingApproval == nil {
+            AskQuestionWindowController.shared.show()
+        }
+    }
+
+    func dismissAskQuestion() {
+        pendingAskQuestion = nil
+        AskQuestionWindowController.shared.dismiss()
+    }
+
 }

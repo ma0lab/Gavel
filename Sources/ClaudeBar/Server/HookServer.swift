@@ -118,6 +118,10 @@ actor HookServer {
             // PermissionRequest: exit 0 immediately to suppress Claude Code's own terminal dialog.
             // The PreToolUse hook fires after this and handles actual approval via ClaudeBar popup.
             response = HookResponse(decision: .allow, reason: nil, requestId: requestId)
+        case .askUserQuestion:
+            // Fire-and-forget: notify ClaudeBar to show the question popup, then unblock Claude Code.
+            Task { @MainActor in AppState.shared.presentAskQuestion(from: request) }
+            response = HookResponse(decision: .allow, reason: nil, requestId: requestId)
         case .notification:
             Task { @MainActor in AppState.shared.addNotification(from: request) }
             response = HookResponse(decision: .allow, reason: nil, requestId: requestId)
@@ -132,10 +136,24 @@ actor HookServer {
     }
 
     private func waitForApproval(request: HookRequest) async -> HookResponse {
-        await withCheckedContinuation { continuation in
-            pendingApprovals[request.requestId] = continuation
-            Task { @MainActor in
-                AppState.shared.presentApproval(request: request, server: self)
+        enum Outcome { case autoAllow; case prompt(envWarn: Bool) }
+        let outcome = await MainActor.run { () -> Outcome in
+            let state = AppState.shared
+            if state.matchesAutoAllowRule(request) {
+                state.logAutoAllow(request)
+                return .autoAllow
+            }
+            return .prompt(envWarn: state.needsEnvWarning(request))
+        }
+        switch outcome {
+        case .autoAllow:
+            return HookResponse(decision: .allow, reason: nil, requestId: request.requestId)
+        case .prompt(let envWarn):
+            return await withCheckedContinuation { continuation in
+                pendingApprovals[request.requestId] = continuation
+                Task { @MainActor in
+                    AppState.shared.presentApproval(request: request, server: self, isEnvWarning: envWarn)
+                }
             }
         }
     }
