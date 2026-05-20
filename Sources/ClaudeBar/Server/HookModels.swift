@@ -75,7 +75,7 @@ struct HookRequest: Codable, Sendable {
     }
 }
 
-struct SessionInfo: Identifiable, Sendable {
+struct SessionInfo: Identifiable, Sendable, Equatable {
     let id: String
     let workingDirectory: String?
 

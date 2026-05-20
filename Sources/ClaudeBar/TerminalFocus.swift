@@ -53,24 +53,13 @@ func focusSession(dir: String) async {
     await MainActor.run { activateAnyTerminal() }
 }
 
-// dir に対応する claude プロセスの PID を返す
 private func findClaudePid(inDir dir: String) -> Int32? {
-    guard let data = runProc("/usr/bin/pgrep", args: ["-x", "claude"]),
-          let str = String(data: data, encoding: .utf8) else { return nil }
     let target = dir.hasSuffix("/") ? dir : dir + "/"
-    return str.components(separatedBy: .newlines)
-        .compactMap { Int32($0.trimmingCharacters(in: .whitespaces)) }
-        .first { pid in
-            guard let cwd = cwdForPid(pid) else { return false }
-            let n = cwd.hasSuffix("/") ? cwd : cwd + "/"
-            return n == target || target.hasPrefix(n)
-        }
-}
-
-private func cwdForPid(_ pid: Int32) -> String? {
-    guard let data = runProc("/usr/sbin/lsof", args: ["-p", "\(pid)", "-a", "-d", "cwd", "-Fn"]),
-          let str = String(data: data, encoding: .utf8) else { return nil }
-    return str.components(separatedBy: .newlines).first { $0.hasPrefix("n") }.map { String($0.dropFirst()) }
+    return claudePids().first { pid in
+        guard let cwd = cwdViaProc(pid) else { return false }
+        let n = cwd.hasSuffix("/") ? cwd : cwd + "/"
+        return n == target || target.hasPrefix(n)
+    }
 }
 
 // プロセスの TTY を返す（/dev/... 形式）
@@ -291,19 +280,6 @@ private func activateAnyTerminal() {
     runningTerminal()?.activate()
 }
 
-// MARK: - プロセス実行
-
-@discardableResult
-private func runProc(_ path: String, args: [String], env: [String: String] = [:]) -> Data? {
-    let p = Process(); p.launchPath = path; p.arguments = args
-    if !env.isEmpty {
-        var e = ProcessInfo.processInfo.environment; env.forEach { e[$0] = $1 }; p.environment = e
-    }
-    let pipe = Pipe(); p.standardOutput = pipe; p.standardError = Pipe()
-    guard (try? p.run()) != nil else { return nil }
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-    p.waitUntilExit(); return data
-}
 
 private func sendViaPipe(_ path: String, args: [String], text: String, env: [String: String] = [:]) {
     let p = Process(); p.launchPath = path; p.arguments = args
