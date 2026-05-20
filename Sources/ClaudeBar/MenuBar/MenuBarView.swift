@@ -153,9 +153,8 @@ struct MenuBarView: View {
                 }
                 .buttonStyle(.plain)
             }
-
-            Spacer(minLength: 6)
         }
+        .padding(.bottom, 6)
     }
 
     private func pendingCount(for session: SessionInfo) -> Int {
