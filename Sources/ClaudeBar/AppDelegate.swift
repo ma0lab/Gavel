@@ -10,6 +10,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var cancellable: AnyCancellable?
     private var approvalCancellable: AnyCancellable?
 
+    private var eventMonitor: Any?
+    private var sizeCancellable: AnyCancellable?
     private var bellTimer: Timer?
     private var bellPhase = 0
     private var cachedTerminal: NSImage?
@@ -73,37 +75,44 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Close menu popover when approval arrives so they don't conflict
+        // Close menu dashboard when approval arrives (approval window takes over)
         approvalCancellable = AppState.shared.$approvalQueue
             .receive(on: DispatchQueue.main)
             .sink { [weak self] queue in
                 if !queue.isEmpty {
-                    self?.menuPopover?.performClose(nil)
+                    self?.hideMenuPopover()
                 }
             }
 
         // Configure menu popover
         let mp = NSPopover()
-        mp.contentSize = NSSize(width: 320, height: 400)
-        mp.behavior = .transient
-        mp.animates = true
-        mp.contentViewController = NSHostingController(
+        mp.behavior = .applicationDefined
+        mp.animates = false
+        let hc = NSHostingController(
             rootView: MenuBarView(
-                onShowApproval: { [weak mp] in
-                    mp?.performClose(nil)
-                    ApprovalWindowController.shared.show()
+                onShowApproval: { [weak self] in
+                    self?.hideMenuPopover()
+                    ApprovalWindowController.shared.show(expanded: true)
                 },
                 onOpenSetup:  { [weak self] in self?.openSetupWindow()           },
                 onOpenStats:  { [weak self] in self?.openMainWindow(tab: .stats) }
             )
         )
+        mp.contentViewController = hc
+        // Track SwiftUI content size changes and resize the popover dynamically
+        sizeCancellable = hc.publisher(for: \.preferredContentSize)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak mp] size in
+                guard size.width > 0, size.height > 0 else { return }
+                mp?.contentSize = size
+            }
         menuPopover = mp
     }
 
     @objc private func handleStatusBarClick() {
         guard let event = NSApp.currentEvent else { return }
         if event.type == .rightMouseUp {
-            menuPopover?.performClose(nil)
+            hideMenuPopover()
             showContextMenu()
         } else {
             toggleMenuPopover()
@@ -129,13 +138,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func menuOpenLog()      { openMainWindow(tab: .log)      }
 
     private func toggleMenuPopover() {
-        guard let mp = menuPopover, let button = statusItem?.button else { return }
-        if mp.isShown {
-            mp.performClose(nil)
-        } else {
-            mp.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            NSApp.activate(ignoringOtherApps: true)
+        guard let mp = menuPopover else { return }
+        if mp.isShown { hideMenuPopover() } else { showMenuPopover() }
+    }
+
+    private func showMenuPopover() {
+        guard let mp = menuPopover, let button = statusItem?.button, !mp.isShown else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        mp.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        mp.contentViewController?.view.window?.makeKey()
+        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            self?.hideMenuPopover()
         }
+    }
+
+    private func hideMenuPopover() {
+        menuPopover?.performClose(nil)
+        if let m = eventMonitor { NSEvent.removeMonitor(m); eventMonitor = nil }
     }
 
     func openSetupWindow() {
