@@ -15,7 +15,9 @@ final class AppState: ObservableObject {
 
     @Published private(set) var approvalQueue: [PendingApproval] = []
     @Published var pendingCompletions: [CompletionItem] = []
-    @Published var recentActivity: [ActivityItem] = []
+    @Published private(set) var recentActivity: [ActivityItem] = []
+    @Published private(set) var todaySummary = TodaySummary(allow: 0, deny: 0, sessions: 0)
+    private var todaySessionIds: Set<String> = []
     @Published var activeSessions: [SessionInfo] = []  // hook-based: used by LogView green dot
     @Published var scannedSessions: [SessionInfo] = [] // process-scan: used by dashboard
     @Published var isServerRunning = false
@@ -43,6 +45,10 @@ final class AppState: ObservableObject {
         self.isSetupComplete = UserDefaults.standard.bool(forKey: Keys.isSetupComplete)
         self.blockApprovals = UserDefaults.standard.bool(forKey: Keys.blockApprovals)
         self.enableNativeNotifications = UserDefaults.standard.bool(forKey: Keys.enableNativeNotifications)
+        self.recentActivity = ActivityStore.shared.fetchRecent()
+        let todayItems = ActivityStore.shared.fetchToday()
+        self.todaySessionIds = Set(todayItems.compactMap { $0.sessionId })
+        self.todaySummary = ActivityStats.todaySummary(items: todayItems)
     }
 
     func presentApproval(request: HookRequest, server: HookServer) {
@@ -52,15 +58,12 @@ final class AppState: ObservableObject {
             Task { await server.resolve(requestId: response.requestId, with: response) }
         }, allowAll: nil)
         approvalQueue.append(approval)
-        // ブロッキング承認は常に再表示 — 外クリックで閉じた後に次の承認が来ても確実に表示する
         ApprovalWindowController.shared.show()
     }
 
-    // non-blocking mode: show popup but send terminal input instead of responding to hook
     func trackToolUse(from request: HookRequest) {
         registerSession(from: request)
         clearCompletion(sessionId: request.sessionId, workingDirectory: request.workingDirectory)
-        // 古い non-blocking アイテムをクリア（ユーザーがターミナルで直接応答した場合に残るため）
         approvalQueue.removeAll { !$0.isBlocking }
         let dir = request.workingDirectory
         let approval = PendingApproval(
@@ -109,7 +112,13 @@ final class AppState: ObservableObject {
 
     func addNotification(from request: HookRequest) {
         registerSession(from: request)
-        addActivity(ActivityItem(sessionId: request.sessionId, toolName: "Notification", decision: .allow, preview: request.message ?? ""))
+        addActivity(ActivityItem(
+            sessionId: request.sessionId,
+            toolName: "Notification",
+            decision: .allow,
+            preview: request.message ?? "",
+            workingDirectory: request.workingDirectory
+        ))
         if let msg = request.message, !msg.isEmpty {
             let item = CompletionItem(sessionId: request.sessionId, workingDirectory: request.workingDirectory, message: msg)
             addCompletion(item)
@@ -120,13 +129,32 @@ final class AppState: ObservableObject {
         if let id = request.sessionId {
             activeSessions.removeAll { $0.id == id }
         }
-        addActivity(ActivityItem(sessionId: request.sessionId, toolName: "Stop", decision: .allow, preview: "Session \(request.sessionId?.prefix(8) ?? "—") finished"))
+        addActivity(ActivityItem(
+            sessionId: request.sessionId,
+            toolName: "Stop",
+            decision: .allow,
+            preview: "Session \(request.sessionId?.prefix(8) ?? "—") finished",
+            workingDirectory: request.workingDirectory
+        ))
         let item = CompletionItem(sessionId: request.sessionId, workingDirectory: request.workingDirectory, message: nil)
         addCompletion(item)
     }
 
     func clearCompletion(for session: SessionInfo) {
         clearCompletion(sessionId: session.id, workingDirectory: session.workingDirectory)
+    }
+
+    func dismissSession(_ session: SessionInfo) {
+        activeSessions.removeAll { $0.id == session.id }
+        scannedSessions.removeAll { $0.id == session.id }
+        clearCompletion(sessionId: session.id, workingDirectory: session.workingDirectory)
+    }
+
+    func clearActivity() {
+        recentActivity.removeAll()
+        ActivityStore.shared.clearAll()
+        todaySessionIds.removeAll()
+        todaySummary = TodaySummary(allow: 0, deny: 0, sessions: 0)
     }
 
     func setEnableNativeNotifications(_ value: Bool) {
@@ -147,7 +175,7 @@ final class AppState: ObservableObject {
 
     private func sendNativeNotification(for item: CompletionItem) {
         let content = UNMutableNotificationContent()
-        let project = item.workingDirectory.map { ($0 as NSString).lastPathComponent } ?? "Claude"
+        let project = item.workingDirectory?.projectName ?? "Claude"
         content.title = "\(project) — Done"
         content.body = item.message ?? "Claude finished. Check the terminal."
         content.sound = .default
@@ -188,11 +216,22 @@ final class AppState: ObservableObject {
     }
 
     private func addActivity(from request: HookRequest, decision: Decision) {
-        addActivity(ActivityItem(sessionId: request.sessionId, toolName: request.toolName ?? "Unknown", decision: decision, preview: request.commandPreview))
+        addActivity(ActivityItem(
+            sessionId: request.sessionId,
+            toolName: request.toolName ?? "Unknown",
+            decision: decision,
+            preview: request.commandPreview,
+            workingDirectory: request.workingDirectory
+        ))
     }
 
     private func addActivity(_ item: ActivityItem) {
         recentActivity.insert(item, at: 0)
-        if recentActivity.count > 50 { recentActivity.removeLast() }
+        if recentActivity.count > 200 { recentActivity.removeLast() }
+        ActivityStore.shared.insert(item)
+        let allow = todaySummary.allow + (item.decision == .allow ? 1 : 0)
+        let deny  = todaySummary.deny  + (item.decision == .deny  ? 1 : 0)
+        if let sid = item.sessionId { todaySessionIds.insert(sid) }
+        todaySummary = TodaySummary(allow: allow, deny: deny, sessions: todaySessionIds.count)
     }
 }

@@ -14,7 +14,8 @@ let package = Package(
             path: "Sources/ClaudeBar",
             swiftSettings: [
                 .unsafeFlags(["-enable-experimental-feature", "StrictConcurrency"])
-            ]
+            ],
+            linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .executableTarget(
             name: "claudebar-hook",

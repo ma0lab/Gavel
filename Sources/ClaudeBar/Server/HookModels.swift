@@ -129,14 +129,26 @@ struct ActivityItem: Identifiable, Sendable {
     let toolName: String
     let decision: Decision
     let preview: String
+    let workingDirectory: String?
 
-    init(sessionId: String? = nil, toolName: String, decision: Decision, preview: String) {
+    init(sessionId: String? = nil, toolName: String, decision: Decision, preview: String, workingDirectory: String? = nil) {
         self.id = UUID()
         self.timestamp = Date()
         self.sessionId = sessionId
         self.toolName = toolName
         self.decision = decision
         self.preview = preview
+        self.workingDirectory = workingDirectory
+    }
+
+    init(id: UUID, timestamp: Date, sessionId: String?, toolName: String, decision: Decision, preview: String, workingDirectory: String?) {
+        self.id = id
+        self.timestamp = timestamp
+        self.sessionId = sessionId
+        self.toolName = toolName
+        self.decision = decision
+        self.preview = preview
+        self.workingDirectory = workingDirectory
     }
 }
 
