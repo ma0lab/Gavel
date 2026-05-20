@@ -11,6 +11,7 @@ private struct LogSection: Identifiable {
 
 struct LogView: View {
     @ObservedObject private var state = AppState.shared
+    @State private var selectedSection: LogSection?
 
     private var sections: [LogSection] {
         var order: [String] = []
@@ -34,30 +35,47 @@ struct LogView: View {
     }
 
     var body: some View {
-        let secs = sections
-        return VStack(spacing: 0) {
+        if let section = selectedSection {
+            SessionDetail(section: section) { selectedSection = nil }
+        } else {
+            sessionList
+        }
+    }
+
+    // MARK: - Session list
+
+    private var sessionList: some View {
+        VStack(spacing: 0) {
             if state.recentActivity.isEmpty {
                 emptyState
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
-                        ForEach(secs) { section in
-                            Section {
-                                ForEach(section.items) { item in
-                                    LogRow(item: item)
-                                    if item.id != section.items.last?.id {
-                                        Divider().padding(.leading, 56)
-                                    }
-                                }
-                            } header: {
-                                ProjectHeader(section: section)
-                            }
+                List {
+                    ForEach(sections) { section in
+                        Button { selectedSection = section } label: {
+                            SessionRow(section: section)
                         }
+                        .buttonStyle(.plain)
                     }
                 }
+                .listStyle(.inset)
+
+                Divider()
+                HStack {
+                    Text("\(state.recentActivity.count) events · \(sections.count) sessions")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Clear") { state.clearActivity() }
+                        .font(.caption)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 9)
+                .background(.bar)
             }
-            footer(sectionCount: secs.count)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var emptyState: some View {
@@ -71,41 +89,45 @@ struct LogView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+}
 
-    private func footer(sectionCount: Int) -> some View {
-        HStack {
-            Text("\(state.recentActivity.count) events · \(sectionCount) projects")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Button("Clear") { state.clearActivity() }
-                .buttonStyle(.plain)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+// MARK: - Shared subviews
+
+private struct ActiveBadge: View {
+    var body: some View {
+        HStack(spacing: 3) {
+            Circle().fill(Color.green).frame(width: 5, height: 5)
+            Text("active").font(.caption2.weight(.medium)).foregroundStyle(.green)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 9)
-        .background(.bar)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(.green.opacity(0.10), in: Capsule())
     }
 }
 
-private struct ProjectHeader: View {
+// MARK: - Session row
+
+private struct SessionRow: View {
     let section: LogSection
 
     var body: some View {
         HStack(spacing: 10) {
             ZStack {
                 RoundedRectangle(cornerRadius: 7)
-                    .fill((section.isActive ? Color.green : Color.secondary).opacity(0.14))
+                    .fill((section.isActive ? Color.green : Color.secondary).opacity(0.12))
                     .frame(width: 32, height: 32)
                 Image(systemName: "folder.fill")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(section.isActive ? .green : .secondary)
             }
-            VStack(alignment: .leading, spacing: 1) {
-                Text(section.projectName)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(section.projectName)
+                        .font(.callout.weight(.medium))
+                        .lineLimit(1)
+                    if section.isActive { ActiveBadge() }
+                }
                 if !section.shortPath.isEmpty {
                     Text(section.shortPath)
                         .font(.caption2.monospaced())
@@ -114,26 +136,85 @@ private struct ProjectHeader: View {
                         .truncationMode(.head)
                 }
             }
+
             Spacer()
-            if section.isActive {
-                HStack(spacing: 4) {
-                    Circle().fill(Color.green).frame(width: 5, height: 5)
-                    Text("active").font(.caption2.weight(.medium)).foregroundStyle(.green)
-                }
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
-                .background(.green.opacity(0.10), in: Capsule())
+
+            HStack(spacing: 6) {
+                Text("\(section.items.count)")
+                    .font(.callout.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
-            Text("\(section.items.count)")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.quaternary)
-                .padding(.trailing, 2)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.regularMaterial)
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
     }
 }
+
+// MARK: - Session detail
+
+private struct SessionDetail: View {
+    let section: LogSection
+    let onBack: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header / back bar
+            HStack(spacing: 10) {
+                Button(action: onBack) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                            .font(.subheadline.weight(.semibold))
+                        Text("Sessions")
+                            .font(.subheadline)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 1) {
+                    HStack(spacing: 6) {
+                        Text(section.projectName)
+                            .font(.subheadline.weight(.semibold))
+                        if section.isActive { ActiveBadge() }
+                    }
+                    if !section.shortPath.isEmpty {
+                        Text(section.shortPath)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Text("\(section.items.count) events")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.bar)
+
+            Divider()
+
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(section.items) { item in
+                        LogRow(item: item)
+                        if item.id != section.items.last?.id {
+                            Divider().padding(.leading, 56)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Log row
 
 private struct LogRow: View {
     let item: ActivityItem
@@ -152,7 +233,8 @@ private struct LogRow: View {
                         .foregroundStyle(toolColor(item.toolName))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(toolColor(item.toolName).opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+                        .background(toolColor(item.toolName).opacity(0.12),
+                                    in: RoundedRectangle(cornerRadius: 4))
                     Spacer()
                     Text(item.timestamp, style: .time)
                         .font(.caption2.monospacedDigit())
