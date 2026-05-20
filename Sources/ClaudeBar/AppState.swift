@@ -2,6 +2,12 @@ import Foundation
 import SwiftUI
 import UserNotifications
 
+enum IntentState: Sendable {
+    case loading
+    case found(String)
+    case none
+}
+
 struct PendingApproval: Sendable {
     let request: HookRequest
     let isBlocking: Bool
@@ -22,6 +28,11 @@ final class AppState: ObservableObject {
     @Published var scannedSessions: [SessionInfo] = [] // process-scan: used by dashboard
     @Published var isServerRunning = false
     @Published var enableNativeNotifications: Bool
+    @Published var intentState: IntentState = .none
+    @Published var approvalExpanded: Bool = false
+    @Published var autoOpenAfterApproval: Bool
+    @Published var autoOpenDuration: Double
+    private var lastQueueClearedTime: Date?
 
     // Sessions shown in the dashboard: process-scan as primary, hook-only sessions as supplement
     var displayedSessions: [SessionInfo] {
@@ -39,12 +50,16 @@ final class AppState: ObservableObject {
         static let isSetupComplete = "isSetupComplete"
         static let blockApprovals = "blockApprovals"
         static let enableNativeNotifications = "enableNativeNotifications"
+        static let autoOpenAfterApproval = "autoOpenAfterApproval"
+        static let autoOpenDuration = "autoOpenDuration"
     }
 
     private init() {
         self.isSetupComplete = UserDefaults.standard.bool(forKey: Keys.isSetupComplete)
         self.blockApprovals = UserDefaults.standard.bool(forKey: Keys.blockApprovals)
         self.enableNativeNotifications = UserDefaults.standard.bool(forKey: Keys.enableNativeNotifications)
+        self.autoOpenAfterApproval = UserDefaults.standard.object(forKey: Keys.autoOpenAfterApproval) as? Bool ?? true
+        self.autoOpenDuration = UserDefaults.standard.object(forKey: Keys.autoOpenDuration) as? Double ?? 5.0
         self.recentActivity = ActivityStore.shared.fetchRecent()
         let todayItems = ActivityStore.shared.fetchToday()
         self.todaySessionIds = Set(todayItems.compactMap { $0.sessionId })
@@ -58,7 +73,9 @@ final class AppState: ObservableObject {
             Task { await server.resolve(requestId: response.requestId, with: response) }
         }, allowAll: nil)
         approvalQueue.append(approval)
-        ApprovalWindowController.shared.show()
+        loadIntentIfNeeded(from: request)
+        let grace = autoOpenAfterApproval && isWithinGracePeriod()
+        ApprovalWindowController.shared.show(expanded: grace, keepingFocus: grace)
     }
 
     func trackToolUse(from request: HookRequest) {
@@ -78,8 +95,10 @@ final class AppState: ObservableObject {
             }
         )
         approvalQueue.append(approval)
+        loadIntentIfNeeded(from: request)
         if approvalQueue.count == 1 {
-            ApprovalWindowController.shared.show()
+            let grace = autoOpenAfterApproval && isWithinGracePeriod()
+            ApprovalWindowController.shared.show(expanded: grace, keepingFocus: grace)
         }
     }
 
@@ -189,10 +208,43 @@ final class AppState: ObservableObject {
 
     private func advanceQueue() {
         if approvalQueue.isEmpty {
+            lastQueueClearedTime = Date()
+            approvalExpanded = false
             ApprovalWindowController.shared.dismiss()
         } else {
             ApprovalWindowController.shared.show()
         }
+    }
+
+    func loadIntentIfNeeded(from request: HookRequest) {
+        if let ctx = request.context, !ctx.isEmpty {
+            intentState = .found(ctx)
+            return
+        }
+        guard let path = request.transcriptPath else {
+            intentState = .none
+            return
+        }
+        intentState = .loading
+        Task {
+            let text = await TranscriptReader.extractLastIntent(from: path)
+            intentState = text.map { .found($0) } ?? .none
+        }
+    }
+
+    func isWithinGracePeriod() -> Bool {
+        guard let t = lastQueueClearedTime else { return false }
+        return Date().timeIntervalSince(t) <= autoOpenDuration
+    }
+
+    func setAutoOpenAfterApproval(_ value: Bool) {
+        autoOpenAfterApproval = value
+        UserDefaults.standard.set(value, forKey: Keys.autoOpenAfterApproval)
+    }
+
+    func setAutoOpenDuration(_ value: Double) {
+        autoOpenDuration = value
+        UserDefaults.standard.set(value, forKey: Keys.autoOpenDuration)
     }
 
     private func registerSession(from request: HookRequest) {

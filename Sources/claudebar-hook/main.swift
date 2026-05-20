@@ -18,11 +18,16 @@ guard var payload = (try? JSONSerialization.jsonObject(with: stdinData)) as? [St
     exit(0) // fail-open
 }
 
+// PermissionRequest: output JSON to suppress Claude Code's native dialog.
+// PreToolUse handles the actual approval via ClaudeBar popup.
+if isPermissionRequest {
+    print("{\"hookSpecificOutput\":{\"hookEventName\":\"PermissionRequest\",\"decision\":{\"behavior\":\"allow\"}}}")
+    exit(0)
+}
+
 // --no-block: notify ClaudeBar for monitoring but don't intercept terminal approval
 if hookType == "pre_tool_use" && noBlock {
     payload["hook_type"] = "pre_tool_use_notify"
-} else if isPermissionRequest {
-    payload["hook_type"] = "permission_request"
 } else {
     payload["hook_type"] = hookType
 }
@@ -77,8 +82,8 @@ guard sendFrame(sock, sendData) else {
     exit(0)
 }
 
-// Notification, Stop, no-block notify, or PermissionRequest: fire-and-forget — consume ack then exit
-if hookType == "notification" || hookType == "stop" || noBlock || isPermissionRequest {
+// Notification, Stop, no-block notify: fire-and-forget — consume ack then exit
+if hookType == "notification" || hookType == "stop" || noBlock {
     _ = readFrame(sock)
     close(sock)
     exit(0)

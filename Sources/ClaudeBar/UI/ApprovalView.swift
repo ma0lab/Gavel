@@ -6,23 +6,38 @@ final class ApprovalWindowController: NSObject {
     static let shared = ApprovalWindowController()
     private var popover: NSPopover?
 
-    func show() {
+    private static let width: CGFloat     = 460
+    private static let compactH: CGFloat  = 68
+    private static let expandedH: CGFloat = 480
+
+    func show(expanded: Bool = false, keepingFocus: Bool = false) {
         if popover == nil { createPopover() }
         guard let button = StatusBarButtonStore.shared.button else { return }
-        if let hc = popover?.contentViewController as? NSHostingController<ApprovalView> {
-            hc.rootView = ApprovalView()
-        }
+        AppState.shared.approvalExpanded = expanded
+        popover?.contentSize = NSSize(width: Self.width, height: expanded ? Self.expandedH : Self.compactH)
+        if keepingFocus { NSApp.activate(ignoringOtherApps: true) }
+        guard !(popover?.isShown ?? false) else { return }
         popover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        if !keepingFocus {
+            // Yield key window so the user's keyboard focus is not interrupted
+            DispatchQueue.main.async { [weak self] in
+                self?.popover?.contentViewController?.view.window?.resignKey()
+            }
+        }
     }
 
     func dismiss() {
         popover?.performClose(nil)
     }
 
+    func setExpanded(_ expanded: Bool) {
+        popover?.contentSize = NSSize(width: Self.width, height: expanded ? Self.expandedH : Self.compactH)
+    }
+
     private func createPopover() {
         let p = NSPopover()
-        p.contentSize = NSSize(width: 460, height: 480)
-        p.behavior = .transient
+        p.contentSize = NSSize(width: Self.width, height: Self.compactH)
+        p.behavior = .applicationDefined
         p.animates = true
         p.contentViewController = NSHostingController(rootView: ApprovalView())
         self.popover = p
@@ -34,28 +49,43 @@ struct ApprovalView: View {
     @State private var denyReason = ""
     @FocusState private var reasonFocused: Bool
 
+    private var isExpanded: Bool { state.approvalExpanded }
+
     var body: some View {
         if let approval = state.pendingApproval {
             VStack(spacing: 0) {
                 topBar(approval: approval)
-                Divider()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        if let ctx = approval.request.context, !ctx.isEmpty {
-                            intentSection(ctx)
+                if isExpanded {
+                    Divider()
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            if let ctx = approval.request.context?.nilIfEmpty {
+                                intentSection(ctx)
+                                Divider().padding(.horizontal, 18)
+                            } else {
+                                switch state.intentState {
+                                case .found(let text):
+                                    intentSection(text)
+                                    Divider().padding(.horizontal, 18)
+                                case .loading:
+                                    intentLoadingSection
+                                    Divider().padding(.horizontal, 18)
+                                case .none:
+                                    EmptyView()
+                                }
+                            }
+                            commandSection(approval)
                             Divider().padding(.horizontal, 18)
+                            denySection
                         }
-                        commandSection(approval)
-                        Divider().padding(.horizontal, 18)
-                        denySection
                     }
+                    Divider()
+                    actionBar
                 }
-                Divider()
-                actionBar
             }
         } else {
             VStack(spacing: 10) {
-                ProgressView()
+                BrailleSpinner()
                 Text("Waiting for hook event…")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -68,27 +98,36 @@ struct ApprovalView: View {
 
     private func topBar(approval: PendingApproval) -> some View {
         let color = toolColor(for: approval.request.toolName)
-        return HStack(spacing: 12) {
-            // Tool icon badge
-            ZStack {
-                RoundedRectangle(cornerRadius: 9)
-                    .fill(color.opacity(0.14))
-                    .frame(width: 36, height: 36)
-                Image(systemName: toolIcon(for: approval.request.toolName))
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(color)
+        return HStack(spacing: 8) {
+            // Tappable expand area
+            Button { toggleExpanded() } label: {
+                HStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 9)
+                            .fill(color.opacity(0.14))
+                            .frame(width: 36, height: 36)
+                        Image(systemName: toolIcon(for: approval.request.toolName))
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(color)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(approval.request.toolName ?? "Unknown tool")
+                            .font(.subheadline.weight(.semibold))
+                        Text(projectLabel(for: approval.request))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .padding(.trailing, 4)
+                }
+                .contentShape(Rectangle())
             }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(approval.request.toolName ?? "Unknown tool")
-                    .font(.subheadline.weight(.semibold))
-                Text(projectLabel(for: approval.request))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
-            Spacer()
+            .buttonStyle(.plain)
+            .focusable(false)
 
             Button { focusTerminal() } label: {
                 Image(systemName: "terminal")
@@ -99,13 +138,40 @@ struct ApprovalView: View {
             }
             .buttonStyle(.plain)
             .help("Switch to terminal")
+
+            Button { ApprovalWindowController.shared.dismiss() } label: {
+                Image(systemName: "xmark")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 30, height: 30)
+                    .background(.primary.opacity(0.06), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .help("Close")
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
         .background(color.opacity(0.12))
     }
 
+    private func toggleExpanded() {
+        let next = !state.approvalExpanded
+        state.approvalExpanded = next
+        ApprovalWindowController.shared.setExpanded(next)
+    }
+
     // MARK: - Intent section
+
+    private var intentLoadingSection: some View {
+        HStack(spacing: 6) {
+            BrailleSpinner()
+            Text("Analyzing intent…")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+    }
 
     private func intentSection(_ context: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -173,7 +239,6 @@ struct ApprovalView: View {
         let isBlocking = state.pendingApproval?.isBlocking ?? true
         return VStack(spacing: 0) {
             if !isBlocking {
-                // Non-blocking: send terminal keystrokes matching Claude Code's 1/2/3 prompt
                 HStack(spacing: 8) {
                     Button(role: .destructive) {
                         state.deny(reason: denyReason); denyReason = ""
@@ -205,7 +270,6 @@ struct ApprovalView: View {
                     .keyboardShortcut(.return)
                 }
             } else {
-                // Blocking: respond to hook
                 HStack(spacing: 10) {
                     Button(role: .destructive) {
                         state.deny(reason: denyReason); denyReason = ""

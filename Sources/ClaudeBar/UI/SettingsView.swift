@@ -66,6 +66,40 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Approval Popup") {
+                Toggle(isOn: Binding(
+                    get: { state.autoOpenAfterApproval },
+                    set: { state.setAutoOpenAfterApproval($0) }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Auto-open next approval")
+                        Text("If a new approval arrives within this duration after the last one, open the window automatically (expanded)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if state.autoOpenAfterApproval {
+                    LabeledContent("Grace period") {
+                        HStack(spacing: 8) {
+                            Stepper(
+                                value: Binding(
+                                    get: { state.autoOpenDuration },
+                                    set: { state.setAutoOpenDuration($0) }
+                                ),
+                                in: 1...30,
+                                step: 1
+                            ) {
+                                EmptyView()
+                            }
+                            Text("\(Int(state.autoOpenDuration))s")
+                                .monospacedDigit()
+                                .frame(minWidth: 28, alignment: .trailing)
+                        }
+                    }
+                }
+            }
+
             Section("Activity") {
                 LabeledContent("Recent events") {
                     Text("\(state.recentActivity.count)")
