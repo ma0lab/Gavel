@@ -292,6 +292,13 @@ final class AppState: ObservableObject {
         addActivity(from: request, decision: .allow)
     }
 
+    func logAutoInterceptChange(enabled: Bool, reason: InterceptSwitchReason) {
+        let preview = enabled
+            ? "Intercept restored (\(reason.rawValue))"
+            : "Intercept auto-disabled (\(reason.rawValue))"
+        addActivity(ActivityItem(toolName: "Idle", decision: .allow, preview: preview))
+    }
+
     private func registerSession(from request: HookRequest) {
         guard let id = request.sessionId else { return }
         if !activeSessions.contains(where: { $0.id == id }) {

@@ -161,7 +161,6 @@ private struct SessionDetail: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header / back bar
             HStack(spacing: 10) {
                 Button(action: onBack) {
                     HStack(spacing: 4) {
@@ -261,6 +260,7 @@ private struct LogRow: View {
         case "Write":        return .purple
         case "Read":         return .secondary
         case "Notification": return .teal
+        case "Idle":         return .indigo
         default:             return .secondary
         }
     }

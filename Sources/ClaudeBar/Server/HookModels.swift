@@ -170,6 +170,10 @@ struct ActivityItem: Identifiable, Sendable {
     }
 }
 
+enum InterceptSwitchReason: String, Sendable {
+    case sleep, wake, lock, unlock, idle, active
+}
+
 indirect enum JSONValue: Codable, Sendable {
     case string(String)
     case int(Int)

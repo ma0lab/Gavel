@@ -13,6 +13,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var eventMonitor: Any?
     private var sizeCancellable: AnyCancellable?
     private var bellTimer: Timer?
+    private var idleTimer: Timer?
+    private var autoSwitchedToNoBlock = false
     private var bellPhase = 0
     private var cachedTerminal: NSImage?
     private var cachedBell: NSImage?
@@ -40,6 +42,66 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     AppState.shared.isServerRunning = false
                 }
             }
+        }
+
+        startIdleMonitor()
+        observeSystemEvents()
+    }
+
+    private func startIdleMonitor() {
+        let timer = Timer(timeInterval: 15, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkIdleState() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        idleTimer = timer
+    }
+
+    private func observeSystemEvents() {
+        let wsnc = NSWorkspace.shared.notificationCenter
+        wsnc.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) {
+            [weak self] _ in MainActor.assumeIsolated { self?.autoDisableIntercept(reason: .sleep) }
+        }
+        wsnc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) {
+            [weak self] _ in MainActor.assumeIsolated { self?.autoEnableIntercept(reason: .wake) }
+        }
+
+        let dnc = DistributedNotificationCenter.default()
+        dnc.addObserver(forName: NSNotification.Name("com.apple.screenIsLocked"), object: nil, queue: .main) {
+            [weak self] _ in MainActor.assumeIsolated { self?.autoDisableIntercept(reason: .lock) }
+        }
+        dnc.addObserver(forName: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main) {
+            [weak self] _ in MainActor.assumeIsolated { self?.autoEnableIntercept(reason: .unlock) }
+        }
+    }
+
+    private func autoDisableIntercept(reason: InterceptSwitchReason) {
+        let state = AppState.shared
+        guard state.isSetupComplete, state.blockApprovals, !autoSwitchedToNoBlock else { return }
+        autoSwitchedToNoBlock = true
+        try? ClaudeSettingsManager.install(blockApprovals: false)
+        AppState.shared.logAutoInterceptChange(enabled: false, reason: reason)
+    }
+
+    private func autoEnableIntercept(reason: InterceptSwitchReason) {
+        guard autoSwitchedToNoBlock else { return }
+        autoSwitchedToNoBlock = false
+        try? ClaudeSettingsManager.install(blockApprovals: true)
+        AppState.shared.logAutoInterceptChange(enabled: true, reason: reason)
+    }
+
+    private func checkIdleState() {
+        let state = AppState.shared
+        guard state.isSetupComplete else { return }
+        if !state.blockApprovals {
+            autoSwitchedToNoBlock = false
+            return
+        }
+        // UInt32.max is the documented sentinel for "any event type"
+        let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: UInt32.max)!)
+        if idle >= 60 {
+            autoDisableIntercept(reason: .idle)
+        } else {
+            autoEnableIntercept(reason: .active)
         }
     }
 
@@ -277,6 +339,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        idleTimer?.invalidate(); idleTimer = nil
         Task { await HookServer.shared.stop() }
         ActivityStore.shared.close()
         return .terminateNow

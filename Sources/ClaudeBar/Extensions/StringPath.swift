@@ -7,7 +7,7 @@ extension String {
 }
 
 extension Optional where Wrapped == String {
-    var projectName: String { self?.projectName ?? "(unknown)" }
+    var projectName: String { self?.projectName ?? "System" }
     var shortenedPath: String { self?.shortenedPath ?? "" }
     var nilIfEmpty: String? { self?.nilIfEmpty }
 }
