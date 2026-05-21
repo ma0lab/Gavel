@@ -9,11 +9,10 @@ struct MenuBarView: View {
     @State private var instructionTarget: SessionInfo?
     @State private var sessionsExpanded = false
     @State private var selectedSessionId: String?
+    @State private var displayedTotal: Int = 0
+    @State private var countTask: Task<Void, Never>?
 
     private static let sessionLimit = 5
-
-    private var allowCount: Int { state.todaySummary.allow }
-    private var denyCount: Int  { state.todaySummary.deny  }
 
     var body: some View {
         Group {
@@ -42,7 +41,16 @@ struct MenuBarView: View {
                     .padding(16)
             }
         }
-        .onDisappear { selectedSessionId = nil }
+        .onAppear { startCountUp(to: state.todaySummary.total) }
+        .onChange(of: state.todaySummary.total) { _, newVal in
+            if countTask == nil {
+                withAnimation(.easeOut(duration: 0.25)) { displayedTotal = newVal }
+            }
+        }
+        .onDisappear {
+            selectedSessionId = nil
+            countTask?.cancel()
+        }
         .task(id: selectedSessionId) {
             guard selectedSessionId != nil else { return }
             do {
@@ -66,25 +74,43 @@ struct MenuBarView: View {
                     .lineLimit(1)
             }
             Spacer()
-            if allowCount + denyCount > 0 {
+            if state.todaySummary.total > 0 {
                 Button(action: onOpenStats) {
-                    VStack(alignment: .trailing, spacing: 1) {
-                        Text("Today")
-                            .font(.caption2.weight(.medium))
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text("TODAY")
+                            .font(.system(size: 8, weight: .heavy))
                             .foregroundStyle(.tertiary)
-                        Text("\(allowCount + denyCount)")
-                            .font(.title3.weight(.bold).monospacedDigit())
+                            .tracking(2.5)
+                        Text("\(displayedTotal)")
+                            .font(.system(size: 26, weight: .semibold, design: .rounded).monospacedDigit())
                             .foregroundStyle(.primary)
                     }
                 }
                 .buttonStyle(.plain)
                 .focusEffectDisabled()
-                .padding(.trailing, 4)
                 .help("View today's details")
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
+    }
+
+    private func startCountUp(to target: Int) {
+        countTask?.cancel()
+        displayedTotal = 0
+        guard target > 0 else { return }
+        let steps = 50
+        let intervalNs = UInt64(1_000_000_000) / UInt64(steps)
+        countTask = Task { @MainActor in
+            for i in 1...steps {
+                do { try await Task.sleep(nanoseconds: intervalNs) } catch { return }
+                let t = Double(i) / Double(steps)
+                let eased = t < 0.5 ? 4 * t * t * t : 1.0 - pow(-2 * t + 2, 3) / 2
+                displayedTotal = Int(Double(target) * eased)
+            }
+            displayedTotal = target
+            countTask = nil
+        }
     }
 
     private var statusOrb: some View {
@@ -93,17 +119,6 @@ struct MenuBarView: View {
             Circle().fill(statusColor.opacity(0.25)).frame(width: 22, height: 22)
             Circle().fill(statusColor).frame(width: 11, height: 11)
         }
-    }
-
-    private func statPill(_ count: Int, color: Color, icon: String) -> some View {
-        HStack(spacing: 3) {
-            Image(systemName: icon).font(.system(size: 8, weight: .bold))
-            Text("\(count)").font(.caption.weight(.semibold).monospacedDigit())
-        }
-        .foregroundStyle(color)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
-        .background(color.opacity(0.10), in: Capsule())
     }
 
     // MARK: - Sessions
@@ -302,17 +317,15 @@ private struct InstructionForm: View {
     let session: SessionInfo
     let onDone: () -> Void
 
+    private enum SendStatus { case copied, notFound }
+
     @State private var text = ""
     @State private var isSending = false
-    @State private var statusMessage: String? = nil
+    @State private var sendStatus: SendStatus? = nil
     @FocusState private var focused: Bool
 
-    private var projectName: String {
-        session.workingDirectory.map { ($0 as NSString).lastPathComponent } ?? session.id
-    }
-    private var shortPath: String {
-        session.workingDirectory?.replacingOccurrences(of: NSHomeDirectory(), with: "~") ?? ""
-    }
+    private var projectName: String { session.workingDirectory?.projectName ?? session.id }
+    private var shortPath: String   { session.workingDirectory.shortenedPath }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -382,7 +395,7 @@ private struct InstructionForm: View {
                     .focused($focused)
                     .scrollContentBackground(.hidden)
 
-                if statusMessage == "copied" {
+                if sendStatus == .copied {
                     VStack(alignment: .leading, spacing: 4) {
                         Label("Copied to clipboard — paste with ⌘V in your terminal", systemImage: "doc.on.clipboard")
                             .font(.caption)
@@ -392,7 +405,7 @@ private struct InstructionForm: View {
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                     }
-                } else if statusMessage == "notfound" {
+                } else if sendStatus == .notFound {
                     Label("Terminal not found", systemImage: "exclamationmark.triangle")
                         .font(.caption)
                         .foregroundStyle(.orange)
@@ -441,15 +454,15 @@ private struct InstructionForm: View {
         let instruction = text
         let dir = session.workingDirectory
         isSending = true
-        statusMessage = nil
+        sendStatus = nil
         Task.detached {
             let result = await sendToSession(dir: dir, text: instruction)
             await MainActor.run {
                 isSending = false
                 switch result {
-                case .sent:    onDone()
-                case .copiedOnly: statusMessage = "copied"
-                case .failed:  statusMessage = "notfound"
+                case .sent:       onDone()
+                case .copiedOnly: sendStatus = .copied
+                case .failed:     sendStatus = .notFound
                 }
             }
         }
