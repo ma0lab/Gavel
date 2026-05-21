@@ -64,6 +64,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         wsnc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) {
             [weak self] _ in MainActor.assumeIsolated { self?.autoEnableIntercept(reason: .wake) }
         }
+        wsnc.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) {
+            _ in
+            MainActor.assumeIsolated {
+                guard AppState.shared.pendingAskQuestion != nil,
+                      let app = NSWorkspace.shared.frontmostApplication,
+                      let id = app.bundleIdentifier,
+                      knownTerminalBundleIds.contains(id) else { return }
+                AppState.shared.dismissAskQuestion()
+            }
+        }
 
         let dnc = DistributedNotificationCenter.default()
         dnc.addObserver(forName: NSNotification.Name("com.apple.screenIsLocked"), object: nil, queue: .main) {

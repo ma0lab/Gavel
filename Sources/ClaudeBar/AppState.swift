@@ -87,18 +87,12 @@ final class AppState: ObservableObject {
         registerSession(from: request)
         clearCompletion(sessionId: request.sessionId, workingDirectory: request.workingDirectory)
         approvalQueue.removeAll { !$0.isBlocking }
-        let dir = request.workingDirectory
         let approval = PendingApproval(
             request: request,
             isBlocking: false,
             isEnvWarning: false,
-            respond: { response in
-                let text = response.decision == .deny ? "3\n" : "1\n"
-                Task.detached { _ = await sendToSession(dir: dir, text: text) }
-            },
-            allowAll: {
-                Task.detached { _ = await sendToSession(dir: dir, text: "2\n") }
-            }
+            respond: { _ in },
+            allowAll: { }
         )
         approvalQueue.append(approval)
         loadIntentIfNeeded(from: request)
