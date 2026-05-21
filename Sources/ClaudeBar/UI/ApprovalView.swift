@@ -294,8 +294,7 @@ struct ApprovalView: View {
     }
 
     private func copyCommand(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        NSPasteboard.copy(text)
         copyToastTask?.cancel()
         withAnimation(.easeInOut(duration: 0.15)) { showCopyToast = true }
         copyToastTask = Task { @MainActor in

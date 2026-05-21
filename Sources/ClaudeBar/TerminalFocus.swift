@@ -134,8 +134,7 @@ func focusAnyTerminal() { activateAnyTerminal() }
 private func clipboardSend(text: String) async -> SendResult {
     let found = await MainActor.run { () -> Bool in
         guard let app = runningTerminal() else { return false }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        NSPasteboard.copy(text)
         app.activate()
         return true
     }
@@ -164,6 +163,14 @@ private func clipboardSend(text: String) async -> SendResult {
 
 private let weztermBundleId = "com.github.wez.wezterm"
 private let weztermBin = "/Applications/WezTerm.app/Contents/MacOS/wezterm"
+
+let knownTerminalBundleIds: Set<String> = [
+    "com.apple.Terminal",
+    "com.googlecode.iterm2",
+    weztermBundleId,
+    "com.mitchellh.ghostty",
+    "dev.warp.Warp-Stable",
+]
 
 private func wezTermFocusPane(dir: String) async -> Bool {
     guard let (id, env) = wezFindPane(dir: dir) else { return false }
@@ -266,11 +273,8 @@ private func focusITermTab(tty: String) async {
 // MARK: - ターミナル検索
 
 private func runningTerminal() -> NSRunningApplication? {
-    [weztermBundleId,
-     "com.mitchellh.ghostty",
-     "com.googlecode.iterm2",
-     "dev.warp.Warp-Stable",
-     "com.apple.Terminal"]
+    knownTerminalBundleIds
+        .lazy
         .compactMap { NSRunningApplication.runningApplications(withBundleIdentifier: $0).first }
         .first
 }
