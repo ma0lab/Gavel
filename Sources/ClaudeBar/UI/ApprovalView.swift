@@ -4,53 +4,11 @@ import AppKit
 @MainActor
 final class ApprovalWindowController: NSObject {
     static let shared = ApprovalWindowController()
-    private var panel: NSPanel?
+    private let panel = StatusBarPanel(width: 460, height: 480,
+        viewFactory: { NSHostingView(rootView: ApprovalView()) })
 
-    private static let width: CGFloat  = 460
-    private static let height: CGFloat = 480
-
-    func show() {
-        if panel == nil { createPanel() }
-        guard let p = panel else { return }
-        positionPanel(p)
-        guard !p.isVisible else { return }
-        p.orderFrontRegardless()
-    }
-
-    func dismiss() {
-        panel?.orderOut(nil)
-    }
-
-    private func positionPanel(_ p: NSPanel) {
-        guard let button = StatusBarButtonStore.shared.button,
-              let buttonWindow = button.window else { return }
-        let buttonScreenFrame = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
-        var x = buttonScreenFrame.midX - Self.width / 2
-        let y = buttonScreenFrame.minY - Self.height - 6
-        if let screen = buttonWindow.screen ?? NSScreen.main {
-            x = max(screen.visibleFrame.minX, min(x, screen.visibleFrame.maxX - Self.width))
-        }
-        p.setFrameOrigin(NSPoint(x: x, y: y))
-    }
-
-    private func createPanel() {
-        let p = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: Self.width, height: Self.height),
-            styleMask: [.nonactivatingPanel, .fullSizeContentView],
-            backing: .buffered,
-            defer: true
-        )
-        p.level = .statusBar
-        p.isOpaque = false
-        p.backgroundColor = .clear
-        p.hasShadow = true
-        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        let hostingView = NSHostingView(rootView: ApprovalView())
-        hostingView.frame = NSRect(x: 0, y: 0, width: Self.width, height: Self.height)
-        hostingView.autoresizingMask = [.width, .height]
-        p.contentView = hostingView
-        self.panel = p
-    }
+    func show() { panel.show() }
+    func dismiss() { panel.dismiss() }
 }
 
 struct ApprovalView: View {
@@ -101,16 +59,16 @@ struct ApprovalView: View {
                     Divider()
                     actionBar
                         .confirmationDialog(
-                            "本当に実行しますか？",
+                            "Are you sure?",
                             isPresented: $showDangerConfirm,
                             titleVisibility: .visible
                         ) {
-                            Button("実行する", role: .destructive) {
+                            Button("Run", role: .destructive) {
                                 state.allow(); denyReason = ""
                             }
-                            Button("キャンセル", role: .cancel) {}
+                            Button("Cancel", role: .cancel) {}
                         } message: {
-                            Text("このコマンドはファイルの削除・移動・権限変更など、取り消しのきかない操作を含む可能性があります。")
+                            Text("This command may include irreversible operations such as file deletion, moving, or permission changes.")
                         }
                 }
             } else {
@@ -188,8 +146,8 @@ struct ApprovalView: View {
         warningBanner(
             icon: "exclamationmark.triangle.fill",
             color: .orange,
-            title: "機密情報が含まれている可能性があります",
-            message: ".env ファイルには API キーやパスワードが含まれることがあります。本当に許可しますか？"
+            title: "Possible sensitive data",
+            message: ".env files may contain API keys or passwords. Are you sure you want to allow?"
         )
     }
 
@@ -197,8 +155,8 @@ struct ApprovalView: View {
         warningBanner(
             icon: "exclamationmark.octagon.fill",
             color: .red,
-            title: "ファイルを変更・削除する操作があります",
-            message: "ファイルの削除・移動・権限変更など、取り消しのきかない操作を含む可能性があります。"
+            title: "Destructive file operation",
+            message: "This may include irreversible operations such as file deletion, moving, or permission changes."
         )
     }
 
@@ -271,7 +229,7 @@ struct ApprovalView: View {
                         .animation(.easeInOut(duration: 0.15), value: showCopyToast)
                 }
                 .buttonStyle(.plain)
-                .help("コピー")
+                .help("Copy")
             }
 
             ZStack(alignment: .bottomTrailing) {
@@ -293,7 +251,7 @@ struct ApprovalView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 10, weight: .semibold))
-                        Text("コピーしました")
+                        Text("Copied")
                             .font(.caption.weight(.medium))
                     }
                     .foregroundStyle(.white)
@@ -482,46 +440,33 @@ struct ApprovalView: View {
 @MainActor
 final class AskQuestionWindowController: NSObject {
     static let shared = AskQuestionWindowController()
-    private var popover: NSPopover?
+    private let panel = StatusBarPanel(width: 460, height: 120,
+        viewFactory: { NSHostingView(rootView: AskQuestionView()) })
 
-    private static let width: CGFloat  = 460
-    private static let height: CGFloat = 120
-
-    func show() {
-        if popover == nil { createPopover() }
-        guard let button = StatusBarButtonStore.shared.button else { return }
-        guard !(popover?.isShown ?? false) else { return }
-        popover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        DispatchQueue.main.async { [weak self] in
-            self?.popover?.contentViewController?.view.window?.resignKey()
-        }
-    }
-
-    func dismiss() {
-        popover?.performClose(nil)
-    }
-
-    private func createPopover() {
-        let p = NSPopover()
-        p.contentSize = NSSize(width: Self.width, height: Self.height)
-        p.behavior = .applicationDefined
-        p.animates = true
-        p.contentViewController = NSHostingController(rootView: AskQuestionView())
-        self.popover = p
-    }
+    func show() { panel.show() }
+    func dismiss() { panel.dismiss() }
 }
 
 struct AskQuestionView: View {
     @ObservedObject private var state = AppState.shared
 
     var body: some View {
-        if let request = state.pendingAskQuestion {
-            VStack(spacing: 0) {
-                topBar(request: request)
-                Divider()
-                bodySection(request: request)
+        Group {
+            if let request = state.pendingAskQuestion {
+                VStack(spacing: 0) {
+                    topBar(request: request)
+                    Divider()
+                    bodySection(request: request)
+                }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(.primary.opacity(0.08), lineWidth: 1)
+        )
     }
 
     private func topBar(request: HookRequest) -> some View {
@@ -573,11 +518,11 @@ struct AskQuestionView: View {
 
     private func bodySection(request: HookRequest) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Claude が質問しています — ターミナルで回答してください")
+            Text("Claude is asking a question — answer in your terminal")
                 .font(.callout)
                 .foregroundStyle(.primary)
 
-            Text("Claude Code の仕様上、ここから回答を送ることはできません")
+            Text("Due to Claude Code limitations, you cannot reply from here")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
