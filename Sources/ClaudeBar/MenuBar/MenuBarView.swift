@@ -384,16 +384,16 @@ private struct InstructionForm: View {
 
                 if statusMessage == "copied" {
                     VStack(alignment: .leading, spacing: 4) {
-                        Label("クリップボードにコピー済み — ターミナルで ⌘V で貼り付け", systemImage: "doc.on.clipboard")
+                        Label("Copied to clipboard — paste with ⌘V in your terminal", systemImage: "doc.on.clipboard")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Button("アクセシビリティを許可する…") { openAccessibilitySettings() }
+                        Button("Allow Accessibility Access…") { openAccessibilitySettings() }
                             .font(.caption)
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                     }
                 } else if statusMessage == "notfound" {
-                    Label("ターミナルが見つかりません", systemImage: "exclamationmark.triangle")
+                    Label("Terminal not found", systemImage: "exclamationmark.triangle")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }

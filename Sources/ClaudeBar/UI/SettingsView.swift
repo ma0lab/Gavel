@@ -2,65 +2,64 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject private var state = AppState.shared
-    @State private var showAddRuleSheet = false
 
     var body: some View {
         Form {
-            Section("接続") {
-                LabeledContent("ソケット") {
+            Section("Connection") {
+                LabeledContent("Socket") {
                     Text("~/Library/Application Support/ClaudeBar/hook.sock")
                         .foregroundStyle(.secondary)
                         .font(.caption)
                 }
-                LabeledContent("状態") {
+                LabeledContent("Status") {
                     HStack(spacing: 6) {
                         Circle()
                             .fill(state.isServerRunning ? Color.green : .gray)
                             .frame(width: 8, height: 8)
-                        Text(state.isServerRunning ? "稼働中" : "停止中")
+                        Text(state.isServerRunning ? "Running" : "Stopped")
                     }
                 }
-                LabeledContent("フック設定") {
-                    Text(ClaudeSettingsManager.isInstalled() ? "済" : "未設定")
+                LabeledContent("Hooks installed") {
+                    Text(ClaudeSettingsManager.isInstalled() ? "Yes" : "No")
                         .foregroundStyle(ClaudeSettingsManager.isInstalled() ? .green : .secondary)
                 }
             }
 
-            Section("Claude Code 連携") {
+            Section("Claude Code Integration") {
                 if state.isSetupComplete {
                     Toggle(isOn: Binding(
                         get: { state.blockApprovals },
                         set: { state.setBlockApprovals($0) }
                     )) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("承認をインターセプト")
+                            Text("Intercept approvals")
                             Text(state.blockApprovals
-                                 ? "ポップアップで承認を制御。ターミナルの承認UIはバイパスされます。"
-                                 : "ターミナルの承認UIが通常通り動作します。ClaudeBar は監視のみ。")
+                                 ? "Popup controls approval. Terminal approval UI is bypassed."
+                                 : "Terminal approval UI works normally. ClaudeBar monitors only.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     }
 
-                    Button("フックをアンインストール") {
+                    Button("Uninstall hooks") {
                         try? ClaudeSettingsManager.uninstall()
                         state.markSetupComplete()
                     }
                     .foregroundStyle(.red)
                 } else {
-                    Text("未接続。メニューからセットアップを実行してください。")
+                    Text("Not connected. Use the menu to run setup.")
                         .foregroundStyle(.secondary)
                 }
             }
 
-            Section("通知") {
+            Section("Notifications") {
                 Toggle(isOn: Binding(
                     get: { state.enableNativeNotifications },
                     set: { state.setEnableNativeNotifications($0) }
                 )) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("macOS 通知")
-                        Text("Claude がセッションを終了したときに通知（Stop / Notification フック）")
+                        Text("macOS notifications")
+                        Text("Notify when Claude finishes a session (Stop / Notification hook)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -73,8 +72,8 @@ struct SettingsView: View {
                     set: { state.setAutoAllowEnabled($0) }
                 )) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Auto Allow を有効にする")
-                        Text("副作用のない読み取り専用ツールを自動的に許可する")
+                        Text("Enable Auto Allow")
+                        Text("Automatically allow read-only tools with no side effects")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -112,7 +111,7 @@ struct SettingsView: View {
                     Button {
                         showAddRuleSheet = true
                     } label: {
-                        Label("ルールを追加", systemImage: "plus.circle")
+                        Label("Add rule", systemImage: "plus.circle")
                     }
                     .sheet(isPresented: $showAddRuleSheet) {
                         AddAutoAllowRuleSheet(isPresented: $showAddRuleSheet)
@@ -120,28 +119,28 @@ struct SettingsView: View {
                 }
             }
 
-            Section("アクティビティ") {
-                LabeledContent("最近のイベント") {
+            Section("Activity") {
+                LabeledContent("Recent events") {
                     Text("\(state.recentActivity.count)")
                         .foregroundStyle(.secondary)
                 }
-                Button("履歴をクリア") {
+                Button("Clear activity") {
                     state.clearActivity()
                 }
                 .foregroundStyle(.secondary)
-                Button("ログを表示...") {
+                Button("View Log...") {
                     MainWindowState.shared.selectedTab = .log
                 }
             }
 
             Section {
-                Button("切断") {
+                Button("Disconnect") {
                     try? ClaudeSettingsManager.uninstall()
                     state.markSetupComplete()
                 }
                 .foregroundStyle(.red)
 
-                Button("ClaudeBar を終了") {
+                Button("Quit ClaudeBar") {
                     NSApplication.shared.terminate(nil)
                 }
                 .foregroundStyle(.red)
@@ -149,6 +148,8 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
     }
+
+    @State private var showAddRuleSheet = false
 }
 
 private struct AddAutoAllowRuleSheet: View {
@@ -160,16 +161,16 @@ private struct AddAutoAllowRuleSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("ルールを追加")
+            Text("Add Rule")
                 .font(.headline)
                 .padding(.top, 20)
                 .padding(.bottom, 16)
 
             Form {
                 Section {
-                    TextField("ツール名 (例: Bash, Read)", text: $toolName)
+                    TextField("Tool name (e.g. Bash, Read)", text: $toolName)
                         .focused($toolNameFocused)
-                    TextField("コマンドパターン (任意, 正規表現)", text: $commandPattern)
+                    TextField("Command pattern (optional, regex)", text: $commandPattern)
                         .font(.system(.body, design: .monospaced))
                 }
                 .textFieldStyle(.roundedBorder)
@@ -180,12 +181,12 @@ private struct AddAutoAllowRuleSheet: View {
             Divider()
 
             HStack(spacing: 12) {
-                Button("キャンセル") {
+                Button("Cancel") {
                     isPresented = false
                 }
                 .keyboardShortcut(.escape)
 
-                Button("追加") {
+                Button("Add") {
                     let pattern = commandPattern.trimmingCharacters(in: .whitespacesAndNewlines)
                     state.addAutoAllowRule(
                         toolName: toolName,

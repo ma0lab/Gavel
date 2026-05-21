@@ -12,7 +12,7 @@ let package = Package(
         .executableTarget(
             name: "ClaudeBar",
             path: "Sources/ClaudeBar",
-            swiftSettings: [
+swiftSettings: [
                 .unsafeFlags(["-enable-experimental-feature", "StrictConcurrency"])
             ],
             linkerSettings: [.linkedLibrary("sqlite3")]

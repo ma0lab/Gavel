@@ -29,11 +29,11 @@ struct StatsView: View {
 
     private var summaryHeader: some View {
         HStack(spacing: 0) {
-            summaryCell(label: "Today", value: "\(state.todaySummary.total)", color: .primary)
+            summaryCell(label: "Today",    value: "\(state.todaySummary.total)",    color: .primary)
             Divider().frame(height: 44)
-            summaryCell(label: "Allowed", value: "\(state.todaySummary.allow)", color: .green)
+            summaryCell(label: "Allowed",  value: "\(state.todaySummary.allow)",    color: .green)
             Divider().frame(height: 44)
-            summaryCell(label: "Denied", value: "\(state.todaySummary.deny)", color: .red)
+            summaryCell(label: "Denied",   value: "\(state.todaySummary.deny)",     color: .red)
             Divider().frame(height: 44)
             summaryCell(label: "Sessions", value: "\(state.todaySummary.sessions)", color: .blue)
         }

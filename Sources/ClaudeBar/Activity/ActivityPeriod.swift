@@ -1,9 +1,9 @@
 import Foundation
 
 enum ActivityPeriod: String, CaseIterable, Identifiable {
-    case day   = "日"
-    case week  = "週"
-    case month = "月"
+    case day   = "Day"
+    case week  = "Week"
+    case month = "Month"
 
     var id: String { rawValue }
 
@@ -62,7 +62,7 @@ enum ActivityPeriod: String, CaseIterable, Identifiable {
         case .week:
             fmt.dateFormat = "M/d"
         case .month:
-            fmt.dateFormat = "M月"
+            fmt.dateFormat = "MMM yyyy"
         }
         return fmt.string(from: date)
     }
