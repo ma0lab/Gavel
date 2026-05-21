@@ -1,82 +1,304 @@
 import SwiftUI
 
-private struct LogSection: Identifiable {
-    let workingDirectory: String?
-    let projectName: String
-    let shortPath: String
-    let isActive: Bool
-    let items: [ActivityItem]
-    var id: String { workingDirectory ?? "__unknown__" }
+private struct LogFilter {
+    var text = ""
+    var toolName: String? = nil
+    var project: String? = nil
+    var decision: Decision? = nil
+    var todayOnly = false
+
+    var isEmpty: Bool {
+        text.isEmpty && toolName == nil && project == nil && decision == nil && !todayOnly
+    }
 }
 
 struct LogView: View {
     @ObservedObject private var state = AppState.shared
-    @State private var selectedSection: LogSection?
+    @State private var filter = LogFilter()
+    @State private var sortOrder = [KeyPathComparator(\ActivityItem.timestamp, order: .reverse)]
+    @State private var selection: Set<UUID> = []
+    @FocusState private var searchFocused: Bool
 
-    private var sections: [LogSection] {
-        var order: [String] = []
-        var groups: [String: [ActivityItem]] = [:]
-        for item in state.recentActivity {
-            let key = item.workingDirectory ?? "__unknown__"
-            if groups[key] == nil { order.append(key) }
-            groups[key, default: []].append(item)
+    private var filteredItems: [ActivityItem] {
+        var base = state.recentActivity
+        if let tool = filter.toolName    { base = base.filter { $0.toolName == tool } }
+        if let proj = filter.project     { base = base.filter { $0.workingDirectory.projectName == proj } }
+        if let dec  = filter.decision    { base = base.filter { $0.decision == dec } }
+        if filter.todayOnly              { base = base.filter { Calendar.current.isDateInToday($0.timestamp) } }
+        if !filter.text.isEmpty {
+            let q = filter.text.lowercased()
+            base = base.filter {
+                $0.toolName.lowercased().contains(q) ||
+                $0.preview.lowercased().contains(q) ||
+                ($0.workingDirectory?.projectName.lowercased().contains(q) ?? false)
+            }
         }
-        let activeDirs = Set(state.activeSessions.compactMap { $0.workingDirectory })
-        return order.map { key in
-            let wd: String? = key == "__unknown__" ? nil : key
-            return LogSection(
-                workingDirectory: wd,
-                projectName: wd.projectName,
-                shortPath: wd.shortenedPath,
-                isActive: wd.map { activeDirs.contains($0) } ?? false,
-                items: groups[key] ?? []
-            )
-        }
+        return base.sorted(using: sortOrder)
+    }
+
+    private var uniqueTools: [String] {
+        Array(Set(state.recentActivity.map { $0.toolName })).sorted()
+    }
+
+    private var uniqueProjects: [String] {
+        Array(Set(state.recentActivity.map { $0.workingDirectory.projectName })).sorted()
     }
 
     var body: some View {
-        if let section = selectedSection {
-            SessionDetail(section: section) { selectedSection = nil }
-        } else {
-            sessionList
-        }
-    }
-
-    // MARK: - Session list
-
-    private var sessionList: some View {
         VStack(spacing: 0) {
+            toolbar
+            Divider()
             if state.recentActivity.isEmpty {
                 emptyState
+            } else if filteredItems.isEmpty {
+                noResultsState
             } else {
-                List {
-                    ForEach(sections) { section in
-                        Button { selectedSection = section } label: {
-                            SessionRow(section: section)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .listStyle(.inset)
-
-                Divider()
-                HStack {
-                    Text("\(state.recentActivity.count) events · \(sections.count) sessions")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Clear") { state.clearActivity() }
-                        .font(.caption)
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 9)
-                .background(.bar)
+                tableArea
             }
+            Divider()
+            footer
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background {
+            Button("") { searchFocused = true }
+                .keyboardShortcut("f", modifiers: .command)
+                .hidden()
+        }
     }
+
+    // MARK: - Toolbar
+
+    private var toolbar: some View {
+        HStack(spacing: 8) {
+            // Search
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                    .font(.system(size: 12, weight: .medium))
+                TextField("Search… (⌘F)", text: $filter.text)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .focused($searchFocused)
+                if !filter.text.isEmpty {
+                    Button { filter.text = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.tertiary)
+                            .font(.system(size: 13))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .frame(maxWidth: .infinity)
+            .background(.quinary, in: RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.separator, lineWidth: 0.5))
+
+            Divider().frame(height: 18)
+
+            // Tool
+            filterMenu(
+                label: filter.toolName ?? "Tool",
+                active: filter.toolName != nil
+            ) {
+                Button("All") { filter.toolName = nil }
+                Divider()
+                ForEach(uniqueTools, id: \.self) { tool in
+                    Button {
+                        filter.toolName = filter.toolName == tool ? nil : tool
+                    } label: {
+                        if filter.toolName == tool {
+                            Label(tool, systemImage: "checkmark")
+                        } else {
+                            Text(tool)
+                        }
+                    }
+                }
+            }
+
+            // Project
+            filterMenu(
+                label: filter.project ?? "Project",
+                active: filter.project != nil
+            ) {
+                Button("All") { filter.project = nil }
+                Divider()
+                ForEach(uniqueProjects, id: \.self) { proj in
+                    Button {
+                        filter.project = filter.project == proj ? nil : proj
+                    } label: {
+                        if filter.project == proj {
+                            Label(proj, systemImage: "checkmark")
+                        } else {
+                            Text(proj)
+                        }
+                    }
+                }
+            }
+
+            // Decision
+            filterMenu(
+                label: filter.decision.map { $0 == .allow ? "Allow" : "Deny" } ?? "Result",
+                active: filter.decision != nil
+            ) {
+                Button("All") { filter.decision = nil }
+                Divider()
+                Button { filter.decision = filter.decision == .allow ? nil : .allow } label: {
+                    if filter.decision == .allow { Label("Allow", systemImage: "checkmark") }
+                    else { Text("Allow") }
+                }
+                Button { filter.decision = filter.decision == .deny ? nil : .deny } label: {
+                    if filter.decision == .deny { Label("Deny", systemImage: "checkmark") }
+                    else { Text("Deny") }
+                }
+            }
+
+            Toggle(isOn: $filter.todayOnly) {
+                Text("Today").font(.caption)
+            }
+            .toggleStyle(.checkbox)
+            .foregroundStyle(filter.todayOnly ? .primary : .secondary)
+
+            if !filter.isEmpty {
+                Button("Clear") { filter = LogFilter() }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.bar)
+    }
+
+    @ViewBuilder
+    private func filterMenu<Content: View>(
+        label: String,
+        active: Bool,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        Menu {
+            content()
+        } label: {
+            HStack(spacing: 3) {
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(active ? .primary : .secondary)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    // MARK: - Table
+
+    private var tableArea: some View {
+        let items = filteredItems
+        return VStack(spacing: 0) {
+            Table(items, selection: $selection, sortOrder: $sortOrder) {
+                TableColumn("") { item in
+                    Image(systemName: item.decision == .allow ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundStyle(item.decision == .allow ? .green : .red)
+                        .font(.system(size: 12))
+                        .contextMenu {
+                            Button("Filter: \(item.decision == .allow ? "Allow" : "Deny")") {
+                                filter.decision = item.decision
+                            }
+                        }
+                }
+                .width(20)
+
+                TableColumn("Tool", value: \.toolName) { item in
+                    Text(item.toolName)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 4))
+                        .contextMenu {
+                            Button("Filter by \"\(item.toolName)\"") { filter.toolName = item.toolName }
+                        }
+                }
+                .width(min: 55, ideal: 80, max: 110)
+
+                TableColumn("Project") { item in
+                    let proj = item.workingDirectory.projectName
+                    Text(proj)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                        .contextMenu {
+                            Button("Filter by \"\(proj)\"") { filter.project = proj }
+                        }
+                }
+                .width(min: 60, ideal: 110, max: 150)
+
+                TableColumn("Preview", value: \.preview) { item in
+                    Text(item.preview.isEmpty ? "—" : item.preview)
+                        .font(.caption)
+                        .foregroundStyle(item.preview.isEmpty ? .quaternary : .secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .contextMenu {
+                            if !item.preview.isEmpty {
+                                Button("Copy") { NSPasteboard.copy(item.preview) }
+                            }
+                        }
+                }
+
+                TableColumn("Time", value: \.timestamp) { item in
+                    Text(item.timestamp, style: .time)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                .width(52)
+            }
+            .tableStyle(.inset)
+
+            if let id = selection.first, let item = items.first(where: { $0.id == id }) {
+                Divider()
+                DetailPanel(item: item)
+            }
+        }
+    }
+
+    // MARK: - Footer
+
+    private var footer: some View {
+        HStack(spacing: 12) {
+            Text(filter.isEmpty
+                 ? "\(state.recentActivity.count) events"
+                 : "\(filteredItems.count) of \(state.recentActivity.count) events")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button {
+                let lines = filteredItems.map {
+                    "\($0.decision == .allow ? "✓" : "✗")\t\($0.toolName)\t\($0.workingDirectory.projectName)\t\($0.preview)\t\(formatted($0.timestamp))"
+                }
+                NSPasteboard.copy(lines.joined(separator: "\n"))
+            } label: {
+                Label("Export", systemImage: "square.and.arrow.up").font(.caption)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Copy filtered results as TSV")
+
+            Button("Clear log") { state.clearActivity(); filter = LogFilter(); selection = [] }
+                .font(.caption)
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
+        .background(.bar)
+    }
+
+    // MARK: - Empty states
 
     private var emptyState: some View {
         VStack(spacing: 10) {
@@ -89,179 +311,70 @@ struct LogView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-}
 
-// MARK: - Shared subviews
-
-private struct ActiveBadge: View {
-    var body: some View {
-        HStack(spacing: 3) {
-            Circle().fill(Color.green).frame(width: 5, height: 5)
-            Text("active").font(.caption2.weight(.medium)).foregroundStyle(.green)
+    private var noResultsState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 26, weight: .light))
+                .foregroundStyle(.quaternary)
+            Text("No matching events")
+                .font(.callout)
+                .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(.green.opacity(0.10), in: Capsule())
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Helpers
+
+    private func formatted(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateStyle = .short
+        f.timeStyle = .medium
+        return f.string(from: date)
     }
 }
 
-// MARK: - Session row
+// MARK: - Detail panel
 
-private struct SessionRow: View {
-    let section: LogSection
-
-    var body: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 7)
-                    .fill((section.isActive ? Color.green : Color.secondary).opacity(0.12))
-                    .frame(width: 32, height: 32)
-                Image(systemName: "folder.fill")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(section.isActive ? .green : .secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(section.projectName)
-                        .font(.callout.weight(.medium))
-                        .lineLimit(1)
-                    if section.isActive { ActiveBadge() }
-                }
-                if !section.shortPath.isEmpty {
-                    Text(section.shortPath)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.head)
-                }
-            }
-
-            Spacer()
-
-            HStack(spacing: 6) {
-                Text("\(section.items.count)")
-                    .font(.callout.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-    }
-}
-
-// MARK: - Session detail
-
-private struct SessionDetail: View {
-    let section: LogSection
-    let onBack: () -> Void
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Button(action: onBack) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.left")
-                            .font(.subheadline.weight(.semibold))
-                        Text("Sessions")
-                            .font(.subheadline)
-                    }
-                    .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-
-                Spacer()
-
-                VStack(alignment: .trailing, spacing: 1) {
-                    HStack(spacing: 6) {
-                        Text(section.projectName)
-                            .font(.subheadline.weight(.semibold))
-                        if section.isActive { ActiveBadge() }
-                    }
-                    if !section.shortPath.isEmpty {
-                        Text(section.shortPath)
-                            .font(.caption2.monospaced())
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                Text("\(section.items.count) events")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(.bar)
-
-            Divider()
-
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(section.items) { item in
-                        LogRow(item: item)
-                        if item.id != section.items.last?.id {
-                            Divider().padding(.leading, 56)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Log row
-
-private struct LogRow: View {
+private struct DetailPanel: View {
     let item: ActivityItem
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: item.decision == .allow ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .foregroundStyle(item.decision == .allow ? .green : .red)
-                .font(.system(size: 15))
-                .frame(width: 28, height: 20)
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 0) {
-                    Text(item.toolName)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(toolColor(item.toolName))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(toolColor(item.toolName).opacity(0.12),
-                                    in: RoundedRectangle(cornerRadius: 4))
-                    Spacer()
-                    Text(item.timestamp, style: .time)
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.quaternary)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: item.decision == .allow ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .foregroundStyle(item.decision == .allow ? .green : .red)
+                    .font(.system(size: 11))
+                Text(item.toolName)
+                    .font(.caption.weight(.semibold))
+                Text("·").foregroundStyle(.quaternary)
+                Text(item.workingDirectory.projectName)
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Text(item.timestamp, format: .dateTime.month().day().hour().minute().second())
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.quaternary)
+                Button {
+                    NSPasteboard.copy(item.preview)
+                } label: {
+                    Image(systemName: "doc.on.doc").font(.caption)
                 }
-                if !item.preview.isEmpty {
-                    Text(item.preview)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tertiary)
+                .help("Copy")
+            }
+            if !item.preview.isEmpty {
+                Text(item.preview)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.primary.opacity(0.85))
+                    .textSelection(.enabled)
+                    .lineLimit(5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 9)
-    }
-
-    private func toolColor(_ name: String) -> Color {
-        switch name {
-        case "Bash":         return .blue
-        case "Edit":         return .orange
-        case "Write":        return .purple
-        case "Read":         return .secondary
-        case "Notification": return .teal
-        case "Idle":         return .indigo
-        default:             return .secondary
-        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.3))
     }
 }
