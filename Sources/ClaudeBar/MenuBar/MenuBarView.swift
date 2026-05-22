@@ -11,6 +11,7 @@ struct MenuBarView: View {
     @State private var selectedSessionId: String?
     @State private var displayedTotal: Int = 0
     @State private var countTask: Task<Void, Never>?
+    @State private var pulse = false
 
     private static let sessionLimit = 5
 
@@ -41,7 +42,7 @@ struct MenuBarView: View {
                     .padding(16)
             }
         }
-        .onAppear { startCountUp(to: state.todaySummary.total) }
+        .onChange(of: state.popoverOpenCount) { _, _ in startCountUp(to: state.todaySummary.total) }
         .onChange(of: state.todaySummary.total) { _, newVal in
             if countTask == nil {
                 withAnimation(.easeOut(duration: 0.25)) { displayedTotal = newVal }
@@ -79,7 +80,7 @@ struct MenuBarView: View {
                     VStack(alignment: .trailing, spacing: 0) {
                         Text("TODAY")
                             .font(.system(size: 8, weight: .heavy))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(statusColor)
                             .tracking(2.5)
                         Text("\(displayedTotal)")
                             .font(.system(size: 26, weight: .semibold, design: .rounded).monospacedDigit())
@@ -115,6 +116,16 @@ struct MenuBarView: View {
 
     private var statusOrb: some View {
         ZStack {
+            if state.isServerRunning {
+                Circle()
+                    .fill(statusColor)
+                    .opacity(pulse ? 0 : 0.45)
+                    .scaleEffect(pulse ? 2.8 : 1.0)
+                    .frame(width: 11, height: 11)
+                    .animation(.easeOut(duration: 1.5).repeatForever(autoreverses: false), value: pulse)
+                    .onAppear { pulse = true }
+                    .onDisappear { pulse = false }
+            }
             Circle().fill(statusColor.opacity(0.12)).frame(width: 34, height: 34)
             Circle().fill(statusColor.opacity(0.25)).frame(width: 22, height: 22)
             Circle().fill(statusColor).frame(width: 11, height: 11)
@@ -208,7 +219,7 @@ struct MenuBarView: View {
             HStack(spacing: 10) {
                 Image(systemName: pending > 0 ? "bell.fill" : "terminal.fill")
                     .font(.system(size: 11))
-                    .foregroundStyle(pending > 0 ? .orange : .green)
+                    .foregroundStyle(pending > 0 ? .orange : .secondary)
                     .frame(width: 28, height: 28)
                     .background((pending > 0 ? Color.orange : Color.green).opacity(0.12),
                                 in: RoundedRectangle(cornerRadius: 7))
@@ -291,10 +302,10 @@ struct MenuBarView: View {
     // MARK: - Helpers
 
     private var statusColor: Color {
-        if state.serverError != nil     { return .red    }
-        if state.pendingApproval != nil { return .orange }
-        if state.isServerRunning        { return .green  }
-        return .gray
+        if state.serverError != nil     { return Color(nsColor: .systemRed)    }
+        if state.pendingApproval != nil { return Color(nsColor: .systemOrange) }
+        if state.isServerRunning        { return Color(nsColor: .systemGreen)  }
+        return Color(nsColor: .systemGray)
     }
 
     private var statusTitle: String {

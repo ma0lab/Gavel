@@ -39,6 +39,7 @@ final class AppState: ObservableObject {
         let hookOnly = activeSessions.filter { !scannedCwds.contains($0.workingDirectory ?? "") }
         return scannedSessions + hookOnly
     }
+    @Published var popoverOpenCount = 0
     @Published var serverError: String?
     @Published var isSetupComplete: Bool
     @Published var blockApprovals: Bool

@@ -219,6 +219,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         mp.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         mp.contentViewController?.view.window?.makeKey()
+        AppState.shared.popoverOpenCount += 1
         eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             self?.hideMenuPopover()
         }
