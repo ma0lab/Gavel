@@ -14,6 +14,7 @@ final class ApprovalWindowController: NSObject {
 struct ApprovalView: View {
     @ObservedObject private var state = AppState.shared
     @State private var denyReason = ""
+    @State private var denyMode = false
     @FocusState private var reasonFocused: Bool
     @State private var showCopyToast = false
     @State private var copyToastTask: Task<Void, Never>?
@@ -25,51 +26,64 @@ struct ApprovalView: View {
                 VStack(spacing: 0) {
                     topBar(approval: approval)
                     Divider()
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 0) {
-                            if let ctx = approval.request.context?.nilIfEmpty {
-                                intentSection(ctx)
-                                Divider().padding(.horizontal, 18)
-                            } else {
-                                switch state.intentState {
-                                case .found(let text):
-                                    intentSection(text)
+                    let slideTrailing = AnyTransition.asymmetric(
+                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                        removal:   .move(edge: .trailing).combined(with: .opacity)
+                    )
+                    let slideLeading = AnyTransition.asymmetric(
+                        insertion: .move(edge: .leading).combined(with: .opacity),
+                        removal:   .move(edge: .leading).combined(with: .opacity)
+                    )
+                    if denyMode {
+                        denyConfirmContent.transition(slideTrailing)
+                    } else {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 0) {
+                                if let ctx = approval.request.context?.nilIfEmpty {
+                                    intentSection(ctx)
                                     Divider().padding(.horizontal, 18)
-                                case .loading:
-                                    intentLoadingSection
-                                    Divider().padding(.horizontal, 18)
-                                case .none:
-                                    intentSection(syntheticIntent(for: approval.request))
+                                } else {
+                                    switch state.intentState {
+                                    case .found(let text):
+                                        intentSection(text)
+                                        Divider().padding(.horizontal, 18)
+                                    case .loading:
+                                        intentLoadingSection
+                                        Divider().padding(.horizontal, 18)
+                                    case .none:
+                                        intentSection(syntheticIntent(for: approval.request))
+                                        Divider().padding(.horizontal, 18)
+                                    }
+                                }
+                                if approval.isEnvWarning {
+                                    envWarningBanner
                                     Divider().padding(.horizontal, 18)
                                 }
+                                if approval.request.isDangerousCommand {
+                                    dangerWarningBanner
+                                    Divider().padding(.horizontal, 18)
+                                }
+                                commandSection(approval)
                             }
-                            if approval.isEnvWarning {
-                                envWarningBanner
-                                Divider().padding(.horizontal, 18)
-                            }
-                            if approval.request.isDangerousCommand {
-                                dangerWarningBanner
-                                Divider().padding(.horizontal, 18)
-                            }
-                            commandSection(approval)
-                            Divider().padding(.horizontal, 18)
-                            denySection
                         }
+                        Divider()
+                        actionBar
+                            .confirmationDialog(
+                                "Are you sure?",
+                                isPresented: $showDangerConfirm,
+                                titleVisibility: .visible
+                            ) {
+                                Button("Run", role: .destructive) { state.allow() }
+                                Button("Cancel", role: .cancel) {}
+                            } message: {
+                                Text("This command may include irreversible operations such as file deletion, moving, or permission changes.")
+                            }
+                        .transition(slideLeading)
                     }
-                    Divider()
-                    actionBar
-                        .confirmationDialog(
-                            "Are you sure?",
-                            isPresented: $showDangerConfirm,
-                            titleVisibility: .visible
-                        ) {
-                            Button("Run", role: .destructive) {
-                                state.allow(); denyReason = ""
-                            }
-                            Button("Cancel", role: .cancel) {}
-                        } message: {
-                            Text("This command may include irreversible operations such as file deletion, moving, or permission changes.")
-                        }
+                }
+                .onChange(of: approval.request.requestId) { _, _ in
+                    withAnimation { denyMode = false }
+                    denyReason = ""
                 }
             } else {
                 VStack(spacing: 10) {
@@ -237,7 +251,7 @@ struct ApprovalView: View {
                     commandContent(preview: preview, toolName: toolName)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxHeight: 130)
+                .frame(maxHeight: 200)
                 .padding(12)
                 .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
                 .overlay(
@@ -304,21 +318,70 @@ struct ApprovalView: View {
         }
     }
 
-    // MARK: - Deny field
+    // MARK: - Deny confirm view
 
-    private var denySection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label("Deny reason", systemImage: "text.bubble")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+    private var denyConfirmContent: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Why are you denying?", systemImage: "text.bubble")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
 
-            TextField("Optional reason or instructions…", text: $denyReason, axis: .vertical)
-                .lineLimit(2...4)
-                .textFieldStyle(.roundedBorder)
-                .focused($reasonFocused)
+                ZStack(alignment: .topLeading) {
+                    TextEditor(text: $denyReason)
+                        .font(.callout)
+                        .frame(minHeight: 100, maxHeight: 160)
+                        .padding(10)
+                        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.primary.opacity(0.08), lineWidth: 1))
+                        .scrollContentBackground(.hidden)
+                        .focused($reasonFocused)
+                    if denyReason.isEmpty {
+                        Text("Optional reason or instructions…")
+                            .font(.callout)
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 14)
+                            .padding(.top, 18)
+                            .allowsHitTesting(false)
+                    }
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
+
+            Spacer(minLength: 0)
+
+            Divider()
+
+            HStack(spacing: 10) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { denyMode = false }
+                    denyReason = ""
+                } label: {
+                    Text("Back").font(.callout.weight(.semibold))
+                        .frame(maxWidth: .infinity).padding(.vertical, 3)
+                }
+                .controlSize(.large).buttonStyle(.bordered)
+                .keyboardShortcut(.escape)
+
+                Button(role: .destructive) {
+                    state.deny(reason: denyReason)
+                    denyReason = ""
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "xmark").font(.callout.weight(.semibold))
+                        Text("Confirm Deny").font(.callout.weight(.semibold))
+                    }
+                    .frame(maxWidth: .infinity).padding(.vertical, 3)
+                }
+                .controlSize(.large).buttonStyle(.borderedProminent).tint(.red)
+                .keyboardShortcut(.return)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .background(.regularMaterial)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
+        .onAppear { reasonFocused = true }
     }
 
     // MARK: - Action bar
@@ -329,7 +392,7 @@ struct ApprovalView: View {
             if !isBlocking {
                 HStack(spacing: 8) {
                     Button(role: .destructive) {
-                        state.deny(reason: denyReason); denyReason = ""
+                        withAnimation(.easeInOut(duration: 0.2)) { denyMode = true }
                     } label: {
                         Text("3. No").font(.callout.weight(.semibold))
                             .frame(maxWidth: .infinity).padding(.vertical, 3)
@@ -360,7 +423,7 @@ struct ApprovalView: View {
             } else {
                 HStack(spacing: 10) {
                     Button(role: .destructive) {
-                        state.deny(reason: denyReason); denyReason = ""
+                        withAnimation(.easeInOut(duration: 0.2)) { denyMode = true }
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "xmark").font(.callout.weight(.semibold))
