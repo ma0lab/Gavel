@@ -22,7 +22,12 @@ cp "$ROOT/Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
 chmod +x "$APP_DIR/Contents/MacOS/ClaudeBar"
 chmod +x "$APP_DIR/Contents/Resources/claudebar-hook"
 
-echo "→ Signing with ad-hoc signature..."
-codesign --force --deep --sign - "$APP_DIR"
+if [ -f "$ROOT/Resources/whisper-cli" ]; then
+    cp "$ROOT/Resources/whisper-cli" "$APP_DIR/Contents/Resources/whisper-cli"
+    chmod +x "$APP_DIR/Contents/Resources/whisper-cli"
+fi
+
+echo "→ Signing with Developer ID..."
+codesign --force --deep --sign "Developer ID Application: Tsubasa Takematsu (B64Q2S6VL5)" "$APP_DIR"
 
 echo "✓ Built: $APP_DIR"
