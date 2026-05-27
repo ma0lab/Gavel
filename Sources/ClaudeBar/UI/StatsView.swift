@@ -105,14 +105,60 @@ struct StatsView: View {
     // MARK: - Summary Header
 
     private var summaryHeader: some View {
-        HStack(spacing: 8) {
-            KPICardView(icon: "bolt.fill",            label: "Total",    value: state.todaySummary.total,    accent: .primary)
-            KPICardView(icon: "checkmark.circle.fill", label: "Allowed",  value: state.todaySummary.allow,    accent: .green)
-            KPICardView(icon: "xmark.circle.fill",     label: "Denied",   value: state.todaySummary.deny,     accent: .red)
-            KPICardView(icon: "terminal.fill",         label: "Sessions", value: state.todaySummary.sessions, accent: .blue)
+        VStack(spacing: 6) {
+            allowedHero
+            HStack(spacing: 6) {
+                KPICardView(icon: "bolt.fill",     label: "Total",    value: state.todaySummary.total,    accent: .primary,  compact: true)
+                KPICardView(icon: "xmark.circle.fill", label: "Denied", value: state.todaySummary.deny,  accent: .red,      compact: true)
+                KPICardView(icon: "terminal.fill",  label: "Sessions", value: state.todaySummary.sessions, accent: .blue,   compact: true)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
+    }
+
+    private static let secondsSavedPerAutoAllow = 5
+
+    private var allowedHero: some View {
+        let autoAllow = state.todaySummary.autoAllow
+        let saved = autoAllow * Self.secondsSavedPerAutoAllow
+        let savedLabel = saved < 60 ? "~\(saved)s saved" : "~\(saved / 60) min saved"
+        return ZStack(alignment: .bottomTrailing) {
+            HStack(alignment: .bottom, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Allowed")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .tracking(0.4)
+                    Text("\(state.todaySummary.allow)")
+                        .font(.system(size: 32, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(Color.primary)
+                }
+                if autoAllow > 0 {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(autoAllow) auto")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.teal)
+                        Text(savedLabel)
+                            .font(.system(size: 9))
+                            .foregroundStyle(Color.teal.opacity(0.7))
+                    }
+                    .padding(.bottom, 4)
+                }
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
+            .background(.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(alignment: .bottomTrailing) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 44, weight: .regular))
+                    .foregroundStyle(Color.green.opacity(0.12))
+                    .offset(x: 4, y: 6)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
     }
 
     // MARK: - Chart Card
@@ -182,7 +228,14 @@ struct StatsView: View {
     private var barChart: some View {
         let unit = periodUnit
         return Chart(buckets) { bucket in
-            BarMark(x: .value("Date", bucket.id, unit: unit), y: .value("Count", bucket.allow))
+            let manualAllow = bucket.allow - bucket.autoAllow
+            BarMark(x: .value("Date", bucket.id, unit: unit), y: .value("Count", bucket.autoAllow))
+                .foregroundStyle(LinearGradient(
+                    colors: [Color.teal, Color.teal.opacity(0.55)],
+                    startPoint: .top, endPoint: .bottom
+                ))
+                .cornerRadius(3)
+            BarMark(x: .value("Date", bucket.id, unit: unit), y: .value("Count", manualAllow))
                 .foregroundStyle(LinearGradient(
                     colors: [Color.accentColor, Color.accentColor.opacity(0.45)],
                     startPoint: .top, endPoint: .bottom
@@ -251,7 +304,7 @@ struct StatsView: View {
                 GeometryReader { geo in
                     let halfW: CGFloat = 50
                     let clampedX = max(halfW, min(tooltipBarX, geo.size.width - halfW))
-                    StatTooltip(label: sel.label, allow: sel.allow, deny: sel.deny)
+                    StatTooltip(label: sel.label, allow: sel.allow, autoAllow: sel.autoAllow, deny: sel.deny)
                         .fixedSize()
                         .allowsHitTesting(false)
                         .position(x: clampedX, y: 26)
@@ -487,7 +540,7 @@ private struct CompMiniChartView: View {
                     GeometryReader { geo in
                         let halfW: CGFloat = 44
                         let clampedX = max(halfW, min(tooltipX, geo.size.width - halfW))
-                        StatTooltip(label: label, allow: allow, deny: deny)
+                        StatTooltip(label: label, allow: allow, autoAllow: 0, deny: deny)
                             .fixedSize()
                             .allowsHitTesting(false)
                             .position(x: clampedX, y: 20)
@@ -509,28 +562,29 @@ private struct KPICardView: View {
     let label: String
     let value: Int
     let accent: Color
+    var compact: Bool = false
 
     private var tint: Color { accent == .primary ? .secondary : accent }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: compact ? 2 : 7) {
             Text(label)
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.tertiary)
                 .tracking(0.4)
             Text("\(value)")
-                .font(.system(size: 22, weight: .bold, design: .rounded).monospacedDigit())
+                .font(.system(size: compact ? 17 : 22, weight: .bold, design: .rounded).monospacedDigit())
                 .foregroundStyle(Color.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)
-        .padding(.vertical, 10)
+        .padding(.vertical, compact ? 14 : 10)
         .background(.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
         .overlay(alignment: .bottomTrailing) {
             Image(systemName: icon)
-                .font(.system(size: 34, weight: .regular))
+                .font(.system(size: compact ? 26 : 34, weight: .regular))
                 .foregroundStyle(tint.opacity(0.15))
                 .offset(x: 4, y: 6)
         }
@@ -611,6 +665,7 @@ private func makeHideTask(after ns: UInt64 = 150_000_000, _ action: @escaping @M
 private struct StatTooltip: View {
     let label: String
     let allow: Int
+    let autoAllow: Int
     let deny: Int
 
     var body: some View {
@@ -623,6 +678,14 @@ private struct StatTooltip: View {
                     Circle().fill(Color.accentColor).frame(width: 5, height: 5)
                     Text("\(allow)")
                         .font(.system(size: 12, weight: .bold, design: .rounded).monospacedDigit())
+                }
+                if autoAllow > 0 {
+                    HStack(spacing: 3) {
+                        Circle().fill(Color.teal).frame(width: 5, height: 5)
+                        Text("\(autoAllow) auto")
+                            .font(.system(size: 11, weight: .medium, design: .rounded).monospacedDigit())
+                            .foregroundStyle(Color.teal)
+                    }
                 }
                 if deny > 0 {
                     HStack(spacing: 3) {

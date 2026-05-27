@@ -32,6 +32,8 @@ final class ActivityStore {
                 working_directory TEXT
             )
         """)
+        // Migrate: add is_auto_allowed column if not present (safe to ignore "duplicate column" error)
+        exec("ALTER TABLE activity ADD COLUMN is_auto_allowed INTEGER NOT NULL DEFAULT 0")
         exec("CREATE INDEX IF NOT EXISTS idx_ts ON activity(timestamp DESC)")
         exec("CREATE INDEX IF NOT EXISTS idx_wd ON activity(working_directory)")
     }
@@ -39,8 +41,8 @@ final class ActivityStore {
     func insert(_ item: ActivityItem) {
         let sql = """
             INSERT OR REPLACE INTO activity
-                (id, timestamp, session_id, tool_name, decision, preview, working_directory)
-            VALUES (?,?,?,?,?,?,?)
+                (id, timestamp, session_id, tool_name, decision, preview, working_directory, is_auto_allowed)
+            VALUES (?,?,?,?,?,?,?,?)
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
@@ -52,6 +54,7 @@ final class ActivityStore {
         bindText(stmt, 5, item.decision.rawValue)
         bindText(stmt, 6, item.preview)
         bindOptional(stmt, 7, item.workingDirectory)
+        sqlite3_bind_int(stmt, 8, item.isAutoAllowed ? 1 : 0)
         sqlite3_step(stmt)
     }
 
@@ -132,7 +135,8 @@ final class ActivityStore {
             toolName: toolName,
             decision: decision,
             preview: col(stmt, 5) ?? "",
-            workingDirectory: col(stmt, 6)
+            workingDirectory: col(stmt, 6),
+            isAutoAllowed: sqlite3_column_int(stmt, 7) != 0
         )
     }
 

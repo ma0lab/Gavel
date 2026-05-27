@@ -2,6 +2,7 @@ import Foundation
 
 struct TodaySummary {
     let allow: Int
+    let autoAllow: Int
     let deny: Int
     let sessions: Int
     var total: Int { allow + deny }
@@ -11,6 +12,7 @@ struct StatBucket: Identifiable {
     let id: Date
     let label: String
     let allow: Int
+    let autoAllow: Int
     let deny: Int
     var total: Int { allow + deny }
 }
@@ -42,11 +44,9 @@ struct ProjectStat: Identifiable {
 
 enum ActivityStats {
     static func todaySummary(items: [ActivityItem]) -> TodaySummary {
-        TodaySummary(
-            allow:    items.filter { $0.decision == .allow }.count,
-            deny:     items.filter { $0.decision == .deny  }.count,
-            sessions: Set(items.compactMap { $0.sessionId }).count
-        )
+        let (allow, autoAllow, deny) = items.decisionCounts
+        let sessions = Set(items.compactMap { $0.sessionId }).count
+        return TodaySummary(allow: allow, autoAllow: autoAllow, deny: deny, sessions: sessions)
     }
 
     static func buckets(items: [ActivityItem], period: ActivityPeriod) -> [StatBucket] {
@@ -55,13 +55,8 @@ enum ActivityStats {
             period.bucketDate(for: $0.timestamp)
         }
         return period.allBucketDates().map { date in
-            let bucket = grouped[date] ?? []
-            return StatBucket(
-                id: date,
-                label: period.label(for: date),
-                allow: bucket.filter { $0.decision == .allow }.count,
-                deny:  bucket.filter { $0.decision == .deny  }.count
-            )
+            StatBucket(id: date, label: period.label(for: date),
+                       counts: grouped[date] ?? [])
         }
     }
 
@@ -81,10 +76,8 @@ enum ActivityStats {
         }
         let fmt = DateFormatter(); fmt.dateFormat = "M/d"
         return dates.map { date in
-            let bucket = grouped[date] ?? []
-            return StatBucket(id: date, label: fmt.string(from: date),
-                              allow: bucket.filter { $0.decision == .allow }.count,
-                              deny:  bucket.filter { $0.decision == .deny  }.count)
+            StatBucket(id: date, label: fmt.string(from: date),
+                       counts: grouped[date] ?? [])
         }
     }
 
@@ -121,16 +114,20 @@ enum ActivityStats {
             (curLabel, prevLabel) = ("Custom", "Prior")
         }
 
-        func summarize(_ from: Date, _ to: Date) -> (allow: Int, deny: Int) {
-            let slice = items.filter { $0.timestamp >= from && $0.timestamp < to }
-            return (allow: slice.filter { $0.decision == .allow }.count,
-                    deny:  slice.filter { $0.decision == .deny  }.count)
+        var curAllow = 0, curDeny = 0, prevAllow = 0, prevDeny = 0
+        for item in items {
+            let t = item.timestamp
+            if t >= curFrom && t < curTo {
+                if item.decision == .allow { curAllow += 1 }
+                else if item.decision == .deny { curDeny += 1 }
+            } else if t >= prevFrom && t < prevTo {
+                if item.decision == .allow { prevAllow += 1 }
+                else if item.decision == .deny { prevDeny += 1 }
+            }
         }
-        let cur  = summarize(curFrom, curTo)
-        let prev = summarize(prevFrom, prevTo)
         return PeriodComparison(
-            stat: ComparisonStat(currentAllow: cur.allow, currentDeny: cur.deny,
-                                 previousAllow: prev.allow, previousDeny: prev.deny),
+            stat: ComparisonStat(currentAllow: curAllow, currentDeny: curDeny,
+                                 previousAllow: prevAllow, previousDeny: prevDeny),
             currentLabel: curLabel,
             previousLabel: prevLabel
         )
@@ -149,5 +146,22 @@ enum ActivityStats {
         let top = Array(stats.prefix(limit))
         let otherCount = stats.dropFirst(limit).reduce(0) { $0 + $1.count }
         return top + [ProjectStat(id: "__other__", name: "Other", count: otherCount)]
+    }
+}
+
+private extension Array where Element == ActivityItem {
+    var decisionCounts: (allow: Int, autoAllow: Int, deny: Int) {
+        reduce(into: (0, 0, 0)) { acc, item in
+            if item.decision == .allow { acc.0 += 1 }
+            if item.isAutoAllowed      { acc.1 += 1 }
+            if item.decision == .deny  { acc.2 += 1 }
+        }
+    }
+}
+
+private extension StatBucket {
+    init(id: Date, label: String, counts: [ActivityItem]) {
+        let (allow, autoAllow, deny) = counts.decisionCounts
+        self.init(id: id, label: label, allow: allow, autoAllow: autoAllow, deny: deny)
     }
 }
