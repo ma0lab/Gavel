@@ -28,6 +28,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         setupStatusBar()
         SessionScanner.shared.start()
+        GlobalKeyMonitor.shared.shortcut = AppState.shared.commandPaletteShortcut
+        GlobalKeyMonitor.shared.onFire = { [weak self] in self?.openFromKeyMode() }
+        GlobalKeyMonitor.shared.start()
         // Sync ~/.claude/settings.json with current blockApprovals preference
         if AppState.shared.isSetupComplete {
             try? ClaudeSettingsManager.install(blockApprovals: AppState.shared.blockApprovals)
@@ -46,6 +49,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         startIdleMonitor()
         observeSystemEvents()
+        if AppState.shared.voiceInputEnabled {
+            VoiceInputCoordinator.shared.start()
+        }
     }
 
     private func startIdleMonitor() {
@@ -182,8 +188,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func handleStatusBarClick() {
-        guard let event = NSApp.currentEvent else { return }
-        if event.type == .rightMouseUp {
+        if NSApp.currentEvent?.type == .rightMouseUp {
             hideMenuPopover()
             showContextMenu()
         } else {
@@ -193,11 +198,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showContextMenu() {
         let menu = NSMenu()
-        menu.addItem(withTitle: "Statistics",     action: #selector(menuOpenStats),              keyEquivalent: "")
-        menu.addItem(withTitle: "Settings",       action: #selector(menuOpenSettings),           keyEquivalent: "")
-        menu.addItem(withTitle: "Activity Log",   action: #selector(menuOpenLog),               keyEquivalent: "")
+        if let rl = RateLimitStore.shared.data.summaryText {
+            let item = NSMenuItem(title: rl, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+            menu.addItem(.separator())
+        }
+        menu.addItem(withTitle: "Statistics",     action: #selector(menuOpenStats),    keyEquivalent: "")
+        menu.addItem(withTitle: "Settings",       action: #selector(menuOpenSettings), keyEquivalent: "")
+        menu.addItem(withTitle: "Activity Log",   action: #selector(menuOpenLog),      keyEquivalent: "")
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Quit ClaudeBar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.addItem(withTitle: "Restart ClaudeBar", action: #selector(menuRestart), keyEquivalent: "")
+        menu.addItem(withTitle: "Quit ClaudeBar",    action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.items.forEach { $0.target = self }
         // statusItem.menu を一時的にセットして表示後に nil に戻す（左クリックを維持するため）
         statusItem?.menu = menu
@@ -208,6 +220,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func menuOpenStats()    { openMainWindow(tab: .stats)    }
     @objc private func menuOpenSettings() { openMainWindow(tab: .settings) }
     @objc private func menuOpenLog()      { openMainWindow(tab: .log)      }
+
+    @objc private func menuRestart() {
+        guard let executablePath = Bundle.main.executablePath else { return }
+        let url = URL(fileURLWithPath: executablePath)
+        let process = Process()
+        process.executableURL = url
+        do {
+            try process.run()
+        } catch {
+            NSLog("[ClaudeBar] menuRestart failed: \(error)")
+            return
+        }
+        NSApp.terminate(nil)
+    }
 
     private func toggleMenuPopover() {
         guard let mp = menuPopover else { return }
@@ -351,9 +377,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         idleTimer?.invalidate(); idleTimer = nil
+        GlobalKeyMonitor.shared.stop()
         Task { await HookServer.shared.stop() }
         ActivityStore.shared.close()
         return .terminateNow
+    }
+
+    func openFromKeyMode() {
+        if AppState.shared.pendingApproval != nil {
+            ApprovalWindowController.shared.show()
+        } else {
+            statusItem?.button?.performClick(nil)
+        }
     }
 }
 

@@ -23,8 +23,9 @@ final class AppState: ObservableObject {
     @Published private(set) var approvalQueue: [PendingApproval] = []
     @Published var pendingCompletions: [CompletionItem] = []
     @Published private(set) var recentActivity: [ActivityItem] = []
-    @Published private(set) var todaySummary = TodaySummary(allow: 0, deny: 0, sessions: 0)
+    @Published private(set) var todaySummary = TodaySummary(allow: 0, autoAllow: 0, deny: 0, sessions: 0)
     private var todaySessionIds: Set<String> = []
+    private var todayStart: Date = Calendar.current.startOfDay(for: Date())
     @Published var activeSessions: [SessionInfo] = []  // hook-based: used by LogView green dot
     @Published var scannedSessions: [SessionInfo] = [] // process-scan: used by dashboard
     @Published var isServerRunning = false
@@ -32,6 +33,9 @@ final class AppState: ObservableObject {
     @Published var intentState: IntentState = .none
     @Published var autoAllowEnabled: Bool
     @Published var autoAllowRules: [AutoAllowRule]
+    @Published var dangerPatterns: [String]
+    private var dangerRegexes: [NSRegularExpression] = []
+    private var autoAllowRegexes: [UUID: NSRegularExpression] = [:]
     @Published var pendingAskQuestion: HookRequest? = nil
     // Sessions shown in the dashboard: process-scan as primary, hook-only sessions as supplement
     var displayedSessions: [SessionInfo] {
@@ -46,12 +50,31 @@ final class AppState: ObservableObject {
 
     var pendingApproval: PendingApproval? { approvalQueue.first }
 
+    @Published var commandPaletteShortcut: CommandPaletteShortcut
+    @Published var voiceInputEnabled: Bool
+    @Published var whisperModelPath: String
+    @Published var voiceTriggerKeyRaw: String
+    @Published var fillerRemovalEnabled: Bool
+    @Published var fillerWords: [String]
+    @Published var correctionEnabled: Bool
+    @Published var voiceVocabulary: [VocabularyEntry]
+    @Published private(set) var voiceHistory: [String] = []
+
     private enum Keys {
         static let isSetupComplete = "isSetupComplete"
         static let blockApprovals = "blockApprovals"
         static let enableNativeNotifications = "enableNativeNotifications"
         static let autoAllowEnabled = "autoAllowEnabled"
         static let autoAllowRules = "autoAllowRules"
+        static let dangerPatterns = "dangerPatterns"
+        static let commandPaletteShortcut = "commandPaletteShortcut"
+        static let voiceInputEnabled = "voiceInputEnabled"
+        static let whisperModelPath = "whisperModelPath"
+        static let voiceTriggerKeyRaw = "voiceTriggerKeyRaw"
+        static let fillerRemovalEnabled = "fillerRemovalEnabled"
+        static let fillerWords = "fillerWords"
+        static let correctionEnabled = "correctionEnabled"
+        static let voiceVocabulary = "voiceVocabulary"
     }
 
     private init() {
@@ -61,11 +84,37 @@ final class AppState: ObservableObject {
         self.autoAllowEnabled = UserDefaults.standard.bool(forKey: Keys.autoAllowEnabled)
         if let data = UserDefaults.standard.data(forKey: Keys.autoAllowRules),
            let rules = try? JSONDecoder().decode([AutoAllowRule].self, from: data) {
-            self.autoAllowRules = rules
+            self.autoAllowRules = AutoAllowRule.migrated(rules)
         } else {
             self.autoAllowRules = AutoAllowRule.defaults
         }
+        if let saved = UserDefaults.standard.stringArray(forKey: Keys.dangerPatterns) {
+            self.dangerPatterns = saved
+        } else {
+            self.dangerPatterns = AppState.defaultDangerPatterns
+        }
+        let shortcutRaw = UserDefaults.standard.string(forKey: Keys.commandPaletteShortcut) ?? ""
+        self.commandPaletteShortcut = CommandPaletteShortcut(rawValue: shortcutRaw) ?? .default
+        self.voiceInputEnabled = UserDefaults.standard.bool(forKey: Keys.voiceInputEnabled)
+        self.whisperModelPath = UserDefaults.standard.string(forKey: Keys.whisperModelPath) ?? ""
+        self.voiceTriggerKeyRaw = UserDefaults.standard.string(forKey: Keys.voiceTriggerKeyRaw) ?? VoiceTriggerKey.rightCommand.rawValue
+        self.fillerRemovalEnabled = UserDefaults.standard.object(forKey: Keys.fillerRemovalEnabled) as? Bool ?? true
+        if let data = UserDefaults.standard.data(forKey: Keys.fillerWords),
+           let words = try? JSONDecoder().decode([String].self, from: data) {
+            self.fillerWords = words
+        } else {
+            self.fillerWords = AppState.defaultFillerWords
+        }
+        self.correctionEnabled = UserDefaults.standard.object(forKey: Keys.correctionEnabled) as? Bool ?? true
+        if let data = UserDefaults.standard.data(forKey: Keys.voiceVocabulary),
+           let entries = try? JSONDecoder().decode([VocabularyEntry].self, from: data) {
+            self.voiceVocabulary = entries
+        } else {
+            self.voiceVocabulary = []
+        }
         self.recentActivity = ActivityStore.shared.fetchRecent()
+        rebuildDangerRegexes()
+        rebuildAutoAllowRegexes()
         Task { @MainActor [self] in
             let todayItems = await ActivityStore.shared.fetchToday()
             self.todaySessionIds = Set(todayItems.compactMap { $0.sessionId })
@@ -74,6 +123,7 @@ final class AppState: ObservableObject {
     }
 
     func presentApproval(request: HookRequest, server: HookServer, isEnvWarning: Bool = false) {
+        ClLog.approval.info("present: tool=\(request.toolName ?? "?") envWarn=\(isEnvWarning) queueLen=\(approvalQueue.count + 1)")
         registerSession(from: request)
         clearCompletion(sessionId: request.sessionId, workingDirectory: request.workingDirectory)
         let approval = PendingApproval(request: request, isBlocking: true, isEnvWarning: isEnvWarning, respond: { response in
@@ -105,6 +155,7 @@ final class AppState: ObservableObject {
     func allow() {
         guard !approvalQueue.isEmpty else { return }
         let approval = approvalQueue.removeFirst()
+        ClLog.approval.info("allow: tool=\(approval.request.toolName ?? "?")")
         let response = HookResponse(decision: .allow, reason: nil, requestId: approval.request.requestId)
         addActivity(from: approval.request, decision: .allow)
         approval.respond(response)
@@ -114,6 +165,7 @@ final class AppState: ObservableObject {
     func allowAll() {
         guard !approvalQueue.isEmpty else { return }
         let approval = approvalQueue.removeFirst()
+        ClLog.approval.info("allowAll: tool=\(approval.request.toolName ?? "?")")
         addActivity(from: approval.request, decision: .allow)
         approval.allowAll?()
         advanceQueue()
@@ -122,11 +174,20 @@ final class AppState: ObservableObject {
     func deny(reason: String) {
         guard !approvalQueue.isEmpty else { return }
         let approval = approvalQueue.removeFirst()
+        ClLog.approval.info("deny: tool=\(approval.request.toolName ?? "?") reason='\(reason)'")
         let text = reason.isEmpty ? "Denied via ClaudeBar" : reason
         let response = HookResponse(decision: .deny, reason: text, requestId: approval.request.requestId)
         addActivity(from: approval.request, decision: .deny)
         approval.respond(response)
         advanceQueue()
+    }
+
+    func appendVoiceHistory(_ text: String) {
+        var h = voiceHistory
+        h.removeAll { $0 == text }
+        h.insert(text, at: 0)
+        if h.count > 10 { h = Array(h.prefix(10)) }
+        voiceHistory = h
     }
 
     func addNotification(from request: HookRequest) {
@@ -173,7 +234,7 @@ final class AppState: ObservableObject {
         recentActivity.removeAll()
         ActivityStore.shared.clearAll()
         todaySessionIds.removeAll()
-        todaySummary = TodaySummary(allow: 0, deny: 0, sessions: 0)
+        todaySummary = TodaySummary(allow: 0, autoAllow: 0, deny: 0, sessions: 0)
     }
 
     func setEnableNativeNotifications(_ value: Bool) {
@@ -237,14 +298,17 @@ final class AppState: ObservableObject {
 
     func addAutoAllowRule(toolName: String, commandPattern: String? = nil) {
         let name = toolName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, !autoAllowRules.contains(where: { $0.toolName == name }) else { return }
+        guard !name.isEmpty else { return }
         let pattern = commandPattern?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        guard !autoAllowRules.contains(where: { $0.toolName == name && $0.commandPattern == pattern }) else { return }
         autoAllowRules.append(AutoAllowRule(toolName: name, commandPattern: pattern))
+        rebuildAutoAllowRegexes()
         saveAutoAllowRules()
     }
 
     func removeAutoAllowRule(id: UUID) {
         autoAllowRules.removeAll { $0.id == id }
+        rebuildAutoAllowRegexes()
         saveAutoAllowRules()
     }
 
@@ -260,18 +324,62 @@ final class AppState: ObservableObject {
         }
     }
 
+    static let defaultDangerPatterns: [String] = [
+        #"\brm\b"#, #"\bmv\b"#, #"\bdd\b"#, #"\bchmod\b"#,
+        #"\bchown\b"#, #"\bsudo\b"#, #"\btruncate\b"#, #"\bshred\b"#,
+    ]
+
+    func isDangerous(_ request: HookRequest) -> Bool {
+        guard request.toolName == AutoAllowRule.bash else { return false }
+        return anyMatch(dangerRegexes, in: request.commandPreview)
+    }
+
+    private func anyMatch(_ regexes: [NSRegularExpression], in command: String) -> Bool {
+        let range = NSRange(command.startIndex..., in: command)
+        return regexes.contains { $0.firstMatch(in: command, range: range) != nil }
+    }
+
+    func addDangerPattern(_ pattern: String) {
+        let p = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !p.isEmpty, !dangerPatterns.contains(p) else { return }
+        guard (try? NSRegularExpression(pattern: p)) != nil else { return }
+        dangerPatterns.append(p)
+        rebuildDangerRegexes()
+        saveDangerPatterns()
+    }
+
+    func removeDangerPattern(_ pattern: String) {
+        dangerPatterns.removeAll { $0 == pattern }
+        rebuildDangerRegexes()
+        saveDangerPatterns()
+    }
+
+    private func saveDangerPatterns() {
+        UserDefaults.standard.set(dangerPatterns, forKey: Keys.dangerPatterns)
+    }
+
+    private func rebuildDangerRegexes() {
+        dangerRegexes = dangerPatterns.compactMap { try? NSRegularExpression(pattern: $0) }
+    }
+
+    private func rebuildAutoAllowRegexes() {
+        autoAllowRegexes = autoAllowRules.reduce(into: [:]) { dict, rule in
+            guard let p = rule.commandPattern, !p.isEmpty,
+                  let regex = try? NSRegularExpression(pattern: p) else { return }
+            dict[rule.id] = regex
+        }
+    }
+
     func matchesAutoAllowRule(_ request: HookRequest) -> Bool {
         guard autoAllowEnabled, let toolName = request.toolName else { return false }
         guard !needsEnvWarning(request) else { return false }
-        guard let rule = autoAllowRules.first(where: { $0.isEnabled && $0.toolName == toolName }) else { return false }
-        if let pattern = rule.commandPattern, !pattern.isEmpty {
-            let command = request.commandPreview
-            guard let regex = try? NSRegularExpression(pattern: pattern),
-                  regex.firstMatch(in: command, range: NSRange(command.startIndex..., in: command)) != nil else {
-                return false
-            }
+        let command = request.commandPreview
+        return autoAllowRules.contains { rule in
+            guard rule.isEnabled && rule.toolName == toolName else { return false }
+            guard let p = rule.commandPattern, !p.isEmpty else { return true }
+            guard let regex = autoAllowRegexes[rule.id] else { return false }
+            return anyMatch([regex], in: command)
         }
-        return true
     }
 
     func needsEnvWarning(_ request: HookRequest) -> Bool {
@@ -284,7 +392,7 @@ final class AppState: ObservableObject {
 
     func logAutoAllow(_ request: HookRequest) {
         registerSession(from: request)
-        addActivity(from: request, decision: .allow)
+        addActivity(from: request, decision: .allow, isAutoAllowed: true)
     }
 
     func logAutoInterceptChange(enabled: Bool, reason: InterceptSwitchReason) {
@@ -314,13 +422,74 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func addActivity(from request: HookRequest, decision: Decision) {
+    func setCommandPaletteShortcut(_ value: CommandPaletteShortcut) {
+        commandPaletteShortcut = value
+        UserDefaults.standard.set(value.rawValue, forKey: Keys.commandPaletteShortcut)
+        GlobalKeyMonitor.shared.stop()
+        GlobalKeyMonitor.shared.shortcut = value
+        GlobalKeyMonitor.shared.start()
+    }
+
+    func setVoiceInputEnabled(_ value: Bool) {
+        voiceInputEnabled = value
+        UserDefaults.standard.set(value, forKey: Keys.voiceInputEnabled)
+        if value {
+            VoiceInputCoordinator.shared.start()
+        } else {
+            VoiceInputCoordinator.shared.stop()
+        }
+    }
+
+    func setWhisperModelPath(_ value: String) {
+        whisperModelPath = value
+        UserDefaults.standard.set(value, forKey: Keys.whisperModelPath)
+        VoiceInputCoordinator.shared.syncSettings()
+    }
+
+    func setVoiceTriggerKey(_ key: VoiceTriggerKey) {
+        voiceTriggerKeyRaw = key.rawValue
+        UserDefaults.standard.set(key.rawValue, forKey: Keys.voiceTriggerKeyRaw)
+        VoiceInputCoordinator.shared.syncSettings()
+    }
+
+    func setFillerRemovalEnabled(_ value: Bool) {
+        fillerRemovalEnabled = value
+        UserDefaults.standard.set(value, forKey: Keys.fillerRemovalEnabled)
+        VoiceInputCoordinator.shared.syncSettings()
+    }
+
+    func setFillerWords(_ words: [String]) {
+        fillerWords = words
+        if let data = try? JSONEncoder().encode(words) {
+            UserDefaults.standard.set(data, forKey: Keys.fillerWords)
+        }
+        VoiceInputCoordinator.shared.syncSettings()
+    }
+
+    func setCorrectionEnabled(_ value: Bool) {
+        correctionEnabled = value
+        UserDefaults.standard.set(value, forKey: Keys.correctionEnabled)
+        VoiceInputCoordinator.shared.syncSettings()
+    }
+
+    func setVoiceVocabulary(_ entries: [VocabularyEntry]) {
+        voiceVocabulary = entries
+        if let data = try? JSONEncoder().encode(entries) {
+            UserDefaults.standard.set(data, forKey: Keys.voiceVocabulary)
+        }
+        VoiceInputCoordinator.shared.syncSettings()
+    }
+
+    static let defaultFillerWords = ["あー","あーあー","えー","えーと","えっと","うー","うーん","んー","まあ","そのー","なんか","なんかー"]
+
+    private func addActivity(from request: HookRequest, decision: Decision, isAutoAllowed: Bool = false) {
         addActivity(ActivityItem(
             sessionId: request.sessionId,
             toolName: request.toolName ?? "Unknown",
             decision: decision,
             preview: request.commandPreview,
-            workingDirectory: request.workingDirectory
+            workingDirectory: request.workingDirectory,
+            isAutoAllowed: isAutoAllowed
         ))
     }
 
@@ -328,10 +497,20 @@ final class AppState: ObservableObject {
         recentActivity.insert(item, at: 0)
         if recentActivity.count > 200 { recentActivity.removeLast() }
         ActivityStore.shared.insert(item)
-        let allow = todaySummary.allow + (item.decision == .allow ? 1 : 0)
-        let deny  = todaySummary.deny  + (item.decision == .deny  ? 1 : 0)
+        resetTodayIfNeeded()
+        let allow     = todaySummary.allow     + (item.decision == .allow ? 1 : 0)
+        let autoAllow = todaySummary.autoAllow + (item.isAutoAllowed ? 1 : 0)
+        let deny      = todaySummary.deny      + (item.decision == .deny  ? 1 : 0)
         if let sid = item.sessionId { todaySessionIds.insert(sid) }
-        todaySummary = TodaySummary(allow: allow, deny: deny, sessions: todaySessionIds.count)
+        todaySummary = TodaySummary(allow: allow, autoAllow: autoAllow, deny: deny, sessions: todaySessionIds.count)
+    }
+
+    private func resetTodayIfNeeded() {
+        let newStart = Calendar.current.startOfDay(for: Date())
+        guard newStart != todayStart else { return }
+        todayStart = newStart
+        todaySessionIds.removeAll()
+        todaySummary = TodaySummary(allow: 0, autoAllow: 0, deny: 0, sessions: 0)
     }
     func presentAskQuestion(from request: HookRequest) {
         registerSession(from: request)
