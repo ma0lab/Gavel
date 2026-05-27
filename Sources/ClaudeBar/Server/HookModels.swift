@@ -93,15 +93,7 @@ extension HookRequest {
         return sessionId.map { "Session \(String($0.prefix(12)))…" } ?? ""
     }
 
-    var isDangerousCommand: Bool {
-        guard toolName == "Bash" else { return false }
-        let cmd = commandPreview
-        return Self.dangerousCommandRegex?.firstMatch(in: cmd, range: NSRange(cmd.startIndex..., in: cmd)) != nil
-    }
 
-    private static let dangerousCommandRegex = try? NSRegularExpression(
-        pattern: #"\b(rm|mv|dd|chmod|chown|sudo|truncate|shred)\b"#
-    )
 }
 
 extension CompletionItem {
@@ -148,8 +140,9 @@ struct ActivityItem: Identifiable, Sendable {
     let decision: Decision
     let preview: String
     let workingDirectory: String?
+    let isAutoAllowed: Bool
 
-    init(sessionId: String? = nil, toolName: String, decision: Decision, preview: String, workingDirectory: String? = nil) {
+    init(sessionId: String? = nil, toolName: String, decision: Decision, preview: String, workingDirectory: String? = nil, isAutoAllowed: Bool = false) {
         self.id = UUID()
         self.timestamp = Date()
         self.sessionId = sessionId
@@ -157,9 +150,10 @@ struct ActivityItem: Identifiable, Sendable {
         self.decision = decision
         self.preview = preview
         self.workingDirectory = workingDirectory
+        self.isAutoAllowed = isAutoAllowed
     }
 
-    init(id: UUID, timestamp: Date, sessionId: String?, toolName: String, decision: Decision, preview: String, workingDirectory: String?) {
+    init(id: UUID, timestamp: Date, sessionId: String?, toolName: String, decision: Decision, preview: String, workingDirectory: String?, isAutoAllowed: Bool = false) {
         self.id = id
         self.timestamp = timestamp
         self.sessionId = sessionId
@@ -167,6 +161,7 @@ struct ActivityItem: Identifiable, Sendable {
         self.decision = decision
         self.preview = preview
         self.workingDirectory = workingDirectory
+        self.isAutoAllowed = isAutoAllowed
     }
 }
 

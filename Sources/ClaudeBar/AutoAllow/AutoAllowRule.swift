@@ -13,12 +13,23 @@ struct AutoAllowRule: Codable, Identifiable, Sendable {
         self.commandPattern = commandPattern
     }
 
+    static let bash = "Bash"
+    static let knownTools = ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "WebSearch"]
+
     static let defaults: [AutoAllowRule] = [
         .init(toolName: "Read"),
         .init(toolName: "Grep"),
         .init(toolName: "Glob"),
-        .init(toolName: "Bash", commandPattern: #"^(grep|rg|find|ls|cat|head|tail|wc|diff|stat|echo|pwd|which)"#),
+        .init(toolName: bash, commandPattern: #"^(grep|rg|find|ls|cat|head|tail|wc|diff|stat|echo|pwd|which)"#),
     ]
+
+    static func migrated(_ rules: [AutoAllowRule]) -> [AutoAllowRule] {
+        rules.compactMap { rule in
+            guard !knownTools.contains(rule.toolName) else { return rule }
+            guard let pattern = rule.commandPattern, !pattern.isEmpty else { return nil }
+            return AutoAllowRule(id: rule.id, toolName: bash, isEnabled: rule.isEnabled, commandPattern: pattern)
+        }
+    }
 }
 
 func isEnvFilePath(_ path: String) -> Bool {

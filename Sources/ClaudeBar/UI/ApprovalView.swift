@@ -4,6 +4,7 @@ import AppKit
 @MainActor
 final class ApprovalWindowController: NSObject {
     static let shared = ApprovalWindowController()
+
     private let panel = StatusBarPanel(width: 460, height: 480,
         viewFactory: { NSHostingView(rootView: ApprovalView()) })
 
@@ -19,6 +20,7 @@ struct ApprovalView: View {
     @State private var showCopyToast = false
     @State private var copyToastTask: Task<Void, Never>?
     @State private var showDangerConfirm = false
+    @State private var arrowKeyMonitor: Any?
 
     var body: some View {
         Group {
@@ -26,16 +28,8 @@ struct ApprovalView: View {
                 VStack(spacing: 0) {
                     topBar(approval: approval)
                     Divider()
-                    let slideTrailing = AnyTransition.asymmetric(
-                        insertion: .move(edge: .trailing).combined(with: .opacity),
-                        removal:   .move(edge: .trailing).combined(with: .opacity)
-                    )
-                    let slideLeading = AnyTransition.asymmetric(
-                        insertion: .move(edge: .leading).combined(with: .opacity),
-                        removal:   .move(edge: .leading).combined(with: .opacity)
-                    )
                     if denyMode {
-                        denyConfirmContent.transition(slideTrailing)
+                        denyConfirmContent.transition(.move(edge: .trailing).combined(with: .opacity))
                     } else {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 0) {
@@ -59,11 +53,14 @@ struct ApprovalView: View {
                                     envWarningBanner
                                     Divider().padding(.horizontal, 18)
                                 }
-                                if approval.request.isDangerousCommand {
+                                if state.isDangerous(approval.request) {
                                     dangerWarningBanner
                                     Divider().padding(.horizontal, 18)
                                 }
                                 commandSection(approval)
+                                if approval.request.toolName?.lowercased() == "write" {
+                                    writeDiffSection(approval)
+                                }
                             }
                         }
                         Divider()
@@ -78,7 +75,7 @@ struct ApprovalView: View {
                             } message: {
                                 Text("This command may include irreversible operations such as file deletion, moving, or permission changes.")
                             }
-                        .transition(slideLeading)
+                        .transition(.move(edge: .leading).combined(with: .opacity))
                     }
                 }
                 .onChange(of: approval.request.requestId) { _, _ in
@@ -102,6 +99,23 @@ struct ApprovalView: View {
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(.primary.opacity(0.08), lineWidth: 1)
         )
+        .onAppear {
+            guard arrowKeyMonitor == nil else { return }
+            arrowKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                guard !self.denyMode, self.state.pendingApproval?.isBlocking == true else { return event }
+                if event.keyCode == 123 { // ← Deny
+                    withAnimation(.easeInOut(duration: 0.2)) { self.denyMode = true }
+                    return nil
+                } else if event.keyCode == 124 { // → Allow
+                    self.triggerAllow()
+                    return nil
+                }
+                return event
+            }
+        }
+        .onDisappear {
+            if let m = arrowKeyMonitor { NSEvent.removeMonitor(m); arrowKeyMonitor = nil }
+        }
     }
 
     // MARK: - Top bar
@@ -188,7 +202,7 @@ struct ApprovalView: View {
     }
 
     private func triggerAllow() {
-        if state.pendingApproval?.request.isDangerousCommand == true {
+        if let req = state.pendingApproval?.request, state.isDangerous(req) {
             showDangerConfirm = true
         } else {
             state.allow(); denyReason = ""
@@ -367,6 +381,7 @@ struct ApprovalView: View {
                 Button(role: .destructive) {
                     state.deny(reason: denyReason)
                     denyReason = ""
+                    denyMode = false
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "xmark").font(.callout.weight(.semibold))
@@ -495,6 +510,100 @@ struct ApprovalView: View {
         default:                             return .purple
         }
     }
+
+    // MARK: - Write diff section
+
+    @ViewBuilder
+    private func writeDiffSection(_ approval: PendingApproval) -> some View {
+        if let rawInput = approval.request.toolInputRaw,
+           case .string(let filePath) = rawInput["file_path"],
+           case .string(let newContent) = rawInput["content"] {
+            let oldContent = (try? String(contentsOf: URL(fileURLWithPath: filePath), encoding: .utf8)) ?? ""
+            let oldLines = oldContent.isEmpty ? [] : oldContent.components(separatedBy: "\n")
+            let newLines = newContent.components(separatedBy: "\n")
+            let diffLines = buildDiff(old: oldLines, new: newLines)
+            let addCount = diffLines.filter { $0.kind == .added }.count
+            let delCount = diffLines.filter { $0.kind == .removed }.count
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label("Diff", systemImage: "arrow.left.arrow.right.square.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if oldLines.isEmpty {
+                        Text("New file")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.green)
+                    } else {
+                        HStack(spacing: 6) {
+                            Text("+\(addCount)")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.green)
+                            Text("-\(delCount)")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.red)
+                        }
+                    }
+                }
+                if !diffLines.isEmpty {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(Array(diffLines.prefix(80).enumerated()), id: \.offset) { _, line in
+                                Text(line.linePrefix + line.text)
+                                    .font(.system(.caption2, design: .monospaced))
+                                    .foregroundStyle(line.displayColor)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 160)
+                    .padding(10)
+                    .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.primary.opacity(0.08), lineWidth: 1))
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+        }
+    }
+}
+
+// MARK: - Diff helpers
+
+private struct DiffLine {
+    enum Kind { case context, added, removed }
+    var kind: Kind
+    var text: String
+    var linePrefix: String { kind == .added ? "+ " : kind == .removed ? "- " : "  " }
+    var displayColor: Color { kind == .added ? .green : kind == .removed ? .red : .secondary }
+}
+
+private func buildDiff(old: [String], new: [String]) -> [DiffLine] {
+    var result: [DiffLine] = []
+    var oi = 0
+    var ni = 0
+    while oi < old.count || ni < new.count {
+        if oi < old.count && ni < new.count && old[oi] == new[ni] {
+            result.append(DiffLine(kind: .context, text: old[oi]))
+            oi += 1
+            ni += 1
+        } else {
+            if oi < old.count { result.append(DiffLine(kind: .removed, text: old[oi])); oi += 1 }
+            if ni < new.count { result.append(DiffLine(kind: .added,   text: new[ni])); ni += 1 }
+        }
+    }
+    return collapseContext(result, window: 3)
+}
+
+private func collapseContext(_ lines: [DiffLine], window: Int) -> [DiffLine] {
+    let changedIndices = lines.indices.filter { lines[$0].kind != .context }
+    guard !changedIndices.isEmpty else { return [] }
+    var keep = IndexSet()
+    for idx in changedIndices {
+        keep.insert(integersIn: max(0, idx - window)...min(lines.count - 1, idx + window))
+    }
+    return keep.map { lines[$0] }
 }
 
 // MARK: - AskQuestion popup

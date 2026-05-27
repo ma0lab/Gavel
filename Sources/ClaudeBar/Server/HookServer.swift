@@ -27,9 +27,11 @@ actor HookServer {
 
     private var serverFd: Int32 = -1
     private var pendingApprovals: [String: CheckedContinuation<HookResponse, Never>] = [:]
+    private let log = ClLog.server
 
     func start() throws {
         let path = Self.socketPath
+        log.info("start: socket=\(path)")
         unlink(path)
 
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -60,6 +62,7 @@ actor HookServer {
         }
 
         serverFd = fd
+        log.info("start: listening OK")
         Task { @MainActor in AppState.shared.isServerRunning = true }
 
         // Blocking accept loop on a dedicated thread
@@ -105,21 +108,22 @@ actor HookServer {
         guard let fixedData = try? JSONSerialization.data(withJSONObject: payload),
               let request = try? JSONDecoder().decode(HookRequest.self, from: fixedData) else { return }
 
+        let tool = request.toolName ?? "?"
+        let hook = request.hookType.rawValue
+        log.info("request: hook=\(hook) tool=\(tool) session=\(request.sessionId?.prefix(8) ?? "?")")
+
         let response: HookResponse
 
         switch request.hookType {
         case .preToolUse:
             response = await waitForApproval(request: request)
+            log.info("response: tool=\(tool) decision=\(response.decision.rawValue)")
         case .preToolUseNotify:
-            // --no-block mode: log activity but don't intercept — terminal approval UI works normally
             Task { @MainActor in AppState.shared.trackToolUse(from: request) }
             response = HookResponse(decision: .allow, reason: nil, requestId: requestId)
         case .permissionRequest:
-            // PermissionRequest: exit 0 immediately to suppress Claude Code's own terminal dialog.
-            // The PreToolUse hook fires after this and handles actual approval via ClaudeBar popup.
             response = HookResponse(decision: .allow, reason: nil, requestId: requestId)
         case .askUserQuestion:
-            // Fire-and-forget: notify ClaudeBar to show the question popup, then unblock Claude Code.
             Task { @MainActor in AppState.shared.presentAskQuestion(from: request) }
             response = HookResponse(decision: .allow, reason: nil, requestId: requestId)
         case .notification:
@@ -147,8 +151,10 @@ actor HookServer {
         }
         switch outcome {
         case .autoAllow:
+            log.debug("autoAllow: tool=\(request.toolName ?? "?")")
             return HookResponse(decision: .allow, reason: nil, requestId: request.requestId)
         case .prompt(let envWarn):
+            log.debug("prompt: tool=\(request.toolName ?? "?") envWarn=\(envWarn)")
             return await withCheckedContinuation { continuation in
                 pendingApprovals[request.requestId] = continuation
                 Task { @MainActor in

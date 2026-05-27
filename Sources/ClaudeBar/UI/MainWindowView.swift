@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum MainTab: Hashable {
-    case stats, log, settings
+    case stats, log, debug, settings, about
 }
 
 @MainActor
@@ -30,7 +30,9 @@ struct MainWindowView: View {
         VStack(alignment: .leading, spacing: 2) {
             sidebarItem(.stats,    icon: "chart.bar.xaxis",       label: "Statistics")
             sidebarItem(.log,      icon: "list.bullet.rectangle", label: "Activity Log")
+            sidebarItem(.debug,    icon: "ant",                   label: "Debug Log")
             sidebarItem(.settings, icon: "gearshape",             label: "Settings")
+            sidebarItem(.about,    icon: "info.circle",           label: "About")
             Spacer()
         }
         .padding(.horizontal, 10)
@@ -70,7 +72,9 @@ struct MainWindowView: View {
         switch windowState.selectedTab {
         case .stats:    StatsView()
         case .log:      LogView()
+        case .debug:    DebugLogView()
         case .settings: SettingsView()
+        case .about:    AboutView()
         }
     }
 }

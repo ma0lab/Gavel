@@ -18,8 +18,8 @@ final class StatusBarPanel {
         if panel == nil { createPanel() }
         guard let p = panel else { return }
         position(p)
-        guard !p.isVisible else { return }
-        p.orderFrontRegardless()
+        if !p.isVisible { p.orderFrontRegardless() }
+        p.makeKey()
     }
 
     func dismiss() {
