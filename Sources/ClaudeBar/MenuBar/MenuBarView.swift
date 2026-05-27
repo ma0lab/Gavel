@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MenuBarView: View {
     @ObservedObject private var state = AppState.shared
+    @ObservedObject private var rateLimitStore = RateLimitStore.shared
     let onShowApproval: () -> Void
     let onOpenSetup: () -> Void
     let onOpenStats: () -> Void
@@ -12,6 +13,7 @@ struct MenuBarView: View {
     @State private var displayedTotal: Int = 0
     @State private var countTask: Task<Void, Never>?
     @State private var pulse = false
+    @State private var rateLimitShowBars = true
 
     private static let sessionLimit = 5
 
@@ -31,6 +33,10 @@ struct MenuBarView: View {
     private var dashboard: some View {
         VStack(spacing: 0) {
             statusSection
+            if rateLimitStore.data.fiveHourPct != nil {
+                Divider()
+                rateLimitSection
+            }
             if !state.displayedSessions.isEmpty {
                 Divider()
                 sessionsSection
@@ -40,6 +46,10 @@ struct MenuBarView: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .padding(16)
+            }
+            if state.voiceInputEnabled && !state.voiceHistory.isEmpty {
+                Divider()
+                voiceHistorySection
             }
         }
         .onChange(of: state.popoverOpenCount) { _, _ in startCountUp(to: state.todaySummary.total) }
@@ -94,6 +104,149 @@ struct MenuBarView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
+    }
+
+    // MARK: - Rate Limits
+
+    private var rateLimitSection: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Rate Limits")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Image(systemName: rateLimitShowBars ? "number" : "chart.bar.fill")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 8)
+
+            if rateLimitShowBars {
+                VStack(spacing: 8) {
+                    rateLimitBarRow(label: "5h", pct: rateLimitStore.data.fiveHourValue,
+                                    resetsAt: rateLimitStore.data.fiveHourResetsAt)
+                    rateLimitBarRow(label: "7d", pct: rateLimitStore.data.sevenDayValue,
+                                    resetsAt: rateLimitStore.data.sevenDayResetsAt)
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 12)
+                .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
+            } else {
+                HStack(spacing: 0) {
+                    rateLimitNumberCard(label: "5-HOUR",
+                                        pct: rateLimitStore.data.fiveHourValue,
+                                        resetsAt: rateLimitStore.data.fiveHourResetsAt)
+                    Rectangle()
+                        .fill(.secondary.opacity(0.15))
+                        .frame(width: 1, height: 44)
+                    rateLimitNumberCard(label: "WEEKLY",
+                                        pct: rateLimitStore.data.sevenDayValue,
+                                        resetsAt: rateLimitStore.data.sevenDayResetsAt)
+                }
+                .padding(.bottom, 12)
+                .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                rateLimitShowBars.toggle()
+            }
+        }
+    }
+
+    private func rateLimitBarRow(label: String, pct: Double, resetsAt: Date?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(label)
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18, alignment: .leading)
+
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(.secondary.opacity(0.12))
+                        Capsule()
+                            .fill(LinearGradient(
+                                colors: [rateLimitColor(pct).opacity(0.75), rateLimitColor(pct)],
+                                startPoint: .leading, endPoint: .trailing
+                            ))
+                            .frame(width: max(4, geo.size.width * min(pct / 100, 1.0)))
+                    }
+                }
+                .frame(height: 5)
+
+                Text("\(Int(pct.rounded()))%")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(rateLimitColor(pct))
+                    .frame(width: 34, alignment: .trailing)
+            }
+
+            if let resetsAt, resetsAt > Date() {
+                HStack(spacing: 0) {
+                    Spacer().frame(width: 26)
+                    Text("resets \(formatTimeUntil(resetsAt))")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                    Text("  (\(formatResetTime(resetsAt)))")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary.opacity(0.7))
+                }
+            }
+        }
+    }
+
+    private func rateLimitNumberCard(label: String, pct: Double, resetsAt: Date?) -> some View {
+        VStack(spacing: 3) {
+            Text(label)
+                .font(.system(size: 8, weight: .heavy))
+                .foregroundStyle(.tertiary)
+                .tracking(1.5)
+            Text("\(Int(pct.rounded()))%")
+                .font(.system(size: 24, weight: .semibold, design: .rounded).monospacedDigit())
+                .foregroundStyle(rateLimitColor(pct))
+            if let resetsAt, resetsAt > Date() {
+                Text(formatTimeUntil(resetsAt))
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func rateLimitColor(_ pct: Double) -> Color {
+        switch pct {
+        case ..<60: return .green
+        case ..<80: return .orange
+        default:    return .red
+        }
+    }
+
+    private func formatTimeUntil(_ date: Date) -> String {
+        let secs = Int(date.timeIntervalSinceNow)
+        guard secs > 0 else { return "now" }
+        let hours = secs / 3600
+        let mins  = (secs % 3600) / 60
+        if hours >= 48 { return "in \(hours / 24)d" }
+        if hours >= 1  { return mins > 0 ? "in \(hours)h \(mins)m" : "in \(hours)h" }
+        return "in \(mins)m"
+    }
+
+    private static let resetTimeFmt: DateFormatter = {
+        let f = DateFormatter(); f.timeStyle = .short; f.dateStyle = .none; return f
+    }()
+    private static let resetDayFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "E"; return f
+    }()
+
+    private func formatResetTime(_ date: Date) -> String {
+        let timeStr = Self.resetTimeFmt.string(from: date)
+        if Calendar.current.isDateInToday(date) { return "today \(timeStr)" }
+        if Calendar.current.isDateInTomorrow(date) { return "tomorrow \(timeStr)" }
+        return "\(Self.resetDayFmt.string(from: date)) \(timeStr)"
     }
 
     private func startCountUp(to target: Int) {
@@ -183,6 +336,43 @@ struct MenuBarView: View {
             }
         }
         .padding(.bottom, 6)
+    }
+
+    // MARK: - Voice History
+
+    private var voiceHistorySection: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Voice History")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 14)
+                .padding(.top, 10)
+                .padding(.bottom, 4)
+            ForEach(state.voiceHistory, id: \.self) { item in
+                HStack {
+                    Text(item)
+                        .font(.callout)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer()
+                    Button {
+                        VoiceOverlayWindowController.shared.pasteText(item)
+                    } label: {
+                        Image(systemName: "doc.on.clipboard")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, height: 28)
+                            .background(.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                    .focusEffectDisabled()
+                    .help("ペースト")
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 5)
+            }
+        }
+        .padding(.bottom, 8)
     }
 
     private func pendingCount(for session: SessionInfo) -> Int {
