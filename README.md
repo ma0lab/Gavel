@@ -2,6 +2,8 @@
 
 A macOS menu bar app that makes working with [Claude Code](https://claude.ai/code) more comfortable.
 
+[日本語](README.ja.md)
+
 [![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/ma0lab)
 
 ![Gavel screenshot](docs/screenshot.png)
