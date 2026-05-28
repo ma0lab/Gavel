@@ -95,18 +95,6 @@ if sessions:
     print(f"${total:.2f} today")
 ```
 
-## Building from source
-
-```bash
-git clone https://github.com/ma0lab/Gavel.git
-cd Gavel
-make build        # builds to dist/Gavel.app
-make deploy       # builds + installs to /Applications + launches
-make dmg          # builds a distributable DMG
-```
-
-Requires Xcode Command Line Tools and a valid Developer ID certificate for code signing.
-
 ## License
 
 MIT

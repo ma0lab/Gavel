@@ -93,18 +93,6 @@ if sessions:
     print(f"${total:.2f} today")
 ```
 
-## ソースからビルド
-
-```bash
-git clone https://github.com/ma0lab/Gavel.git
-cd Gavel
-make build        # dist/Gavel.app をビルド
-make deploy       # ビルド + /Applications にインストール + 起動
-make dmg          # 配布用 DMG を作成
-```
-
-Xcode Command Line Tools と有効な Developer ID 証明書が必要です。
-
 ## ライセンス
 
 MIT
