@@ -8,7 +8,7 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey)](https://github.com/ma0lab/Gavel/releases/latest)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-support-ff5e5b?logo=ko-fi&logoColor=white)](https://ko-fi.com/ma0lab)
 
-[日本語版はこちら](README.ja.md)
+[English](README.md) &nbsp;·&nbsp; [Japanese](README.ja.md)
 
 </div>
 
