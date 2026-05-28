@@ -4,8 +4,6 @@
 
 [![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/ma0lab)
 
-![Gavel スクリーンショット](docs/screenshot.png)
-
 ## 概要
 
 Claude Code はファイルの書き込みやコマンド実行、Web アクセスなどのツールを使う前に許可を求めます。デフォルトではターミナルで `y` か `n` を入力する必要があります。Gavel はそのリクエストをネイティブの macOS UI で表示し、フォーカスを切り替えずに承認・拒否できるようにします。繰り返し操作の自動許可設定や、メニューバーからのレートリミット確認にも対応しています。

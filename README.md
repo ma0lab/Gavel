@@ -6,8 +6,6 @@ A macOS menu bar app that makes working with [Claude Code](https://claude.ai/cod
 
 [![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/ma0lab)
 
-![Gavel screenshot](docs/screenshot.png)
-
 ## What it does
 
 Claude Code asks for permission before running tools like writing files, executing commands, or making web requests. By default you answer `y` or `n` in the terminal. Gavel intercepts those requests and surfaces them in a native macOS UI — so you can approve or deny without switching focus, set up auto-allow rules for repetitive operations, and keep an eye on your rate limits from the menu bar.
