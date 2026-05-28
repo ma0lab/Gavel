@@ -14,7 +14,7 @@
 
 ---
 
-Claude Code asks for permission before running tools like writing files, executing commands, or making web requests. By default you answer `y` or `n` in the terminal. Gavel intercepts those requests and surfaces them in a native macOS UI — so you can approve or deny without switching focus, set up auto-allow rules for repetitive operations, and keep an eye on your rate limits from the menu bar.
+Claude Code asks for permission before running tools like writing files, executing commands, or making web requests. By default it prompts you in the terminal. Gavel intercepts those requests and surfaces them in a native macOS UI — so you can approve or deny without switching focus, set up auto-allow rules for repetitive operations, and keep an eye on your rate limits from the menu bar.
 
 ## Features
 
