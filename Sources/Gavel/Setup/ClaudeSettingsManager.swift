@@ -34,6 +34,30 @@ struct ClaudeSettingsManager {
             }
     }
 
+    static let statuslinePath = (NSHomeDirectory() as NSString)
+        .appendingPathComponent(".claude/statusline.py")
+
+    private static let statuslineScript = """
+        import sys, json, time
+        data = json.load(sys.stdin)
+        rl = data.get('rate_limits', {})
+        five_h = rl.get('five_hour')
+        seven_d = rl.get('seven_day')
+        if five_h or seven_d:
+            payload = {'updated_at': time.time()}
+            if five_h: payload['five_hour'] = five_h
+            if seven_d: payload['seven_day'] = seven_d
+            try:
+                with open('/tmp/gavel_ratelimits.json', 'w') as f:
+                    json.dump(payload, f)
+            except Exception:
+                pass
+        sessions = data.get('sessions', [])
+        if sessions:
+            total = sum(s.get('total_cost_usd', 0) for s in sessions)
+            print(f"${total:.2f} today")
+        """
+
     static func install(blockApprovals: Bool = false) throws {
         guard let binaryPath = hookBinaryPath else { throw ClaudeSettingsError.hookBinaryNotFound }
 
@@ -53,7 +77,7 @@ struct ClaudeSettingsManager {
         hooks["PreToolUse"] = merge(existing: hooks["PreToolUse"] as? [[String: Any]],
                                     adding: hookEntry(command: preToolCmd, matcher: toolMatcher))
         // PermissionRequest: exits 0 immediately to suppress Claude Code's own terminal dialog.
-        // Actual approval is handled by the PreToolUse hook via ClaudeBar popup.
+        // Actual approval is handled by the PreToolUse hook via Gavel popup.
         hooks["PermissionRequest"] = merge(existing: hooks["PermissionRequest"] as? [[String: Any]],
                                            adding: hookEntry(command: "\(binaryPath) permission_request"))
         hooks["Notification"] = merge(existing: hooks["Notification"] as? [[String: Any]],
@@ -61,8 +85,10 @@ struct ClaudeSettingsManager {
         hooks["Stop"] = merge(existing: hooks["Stop"] as? [[String: Any]],
                               adding: hookEntry(command: "\(binaryPath) stop"))
         json["hooks"] = hooks
+        json["statusCommand"] = "python3 \(statuslinePath)"
 
         try atomicWrite(json)
+        try writeStatuslineScript()
     }
 
     static func uninstall() throws {
@@ -80,7 +106,18 @@ struct ClaudeSettingsManager {
             }
         }
         json["hooks"] = hooks
+        json.removeValue(forKey: "statusCommand")
         try atomicWrite(json)
+        try? FileManager.default.removeItem(atPath: statuslinePath)
+    }
+
+    private static func writeStatuslineScript() throws {
+        let dir = (statuslinePath as NSString).deletingLastPathComponent
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        guard FileManager.default.createFile(atPath: statuslinePath,
+                                             contents: Data(statuslineScript.utf8)) else {
+            throw ClaudeSettingsError.writeFailed
+        }
     }
 
     private static func hookEntry(command: String, matcher: String? = nil) -> [String: Any] {

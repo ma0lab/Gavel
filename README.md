@@ -67,44 +67,6 @@ Claude Code asks for permission before running tools like writing files, executi
 
 > **Gatekeeper note**: Gavel is signed with a Developer ID certificate. If macOS blocks it, go to System Settings → Privacy & Security → open anyway.
 
-### Rate limit integration
-
-Gavel reads rate limit data from Claude Code's [statusline API](https://docs.anthropic.com/en/docs/claude-code/settings#status-line-customization). Add this to `~/.claude/settings.json`:
-
-```json
-{
-  "statusCommand": "python3 ~/.claude/statusline.py"
-}
-```
-
-Then create `~/.claude/statusline.py`:
-
-```python
-import sys, json, time
-
-data = json.load(sys.stdin)
-
-rl = data.get('rate_limits', {})
-five_h = rl.get('five_hour')
-seven_d = rl.get('seven_day')
-if five_h or seven_d:
-    payload = {'updated_at': time.time()}
-    if five_h:
-        payload['five_hour'] = five_h
-    if seven_d:
-        payload['seven_day'] = seven_d
-    try:
-        with open('/tmp/gavel_ratelimits.json', 'w') as f:
-            json.dump(payload, f)
-    except Exception:
-        pass
-
-sessions = data.get('sessions', [])
-if sessions:
-    total = sum(s.get('total_cost_usd', 0) for s in sessions)
-    print(f"${total:.2f} today")
-```
-
 ### License
 
 MIT — see [LICENSE](LICENSE)
@@ -160,44 +122,6 @@ MIT — see [LICENSE](LICENSE)
 4. アプリ内のセットアップ画面に従って Claude Code と連携
 
 > **Gatekeeper について**: それでも macOS にブロックされる場合は、システム設定 → プライバシーとセキュリティ → 「このまま開く」を選択してください。
-
-### レートリミット連携
-
-`~/.claude/settings.json` に以下を追加してください:
-
-```json
-{
-  "statusCommand": "python3 ~/.claude/statusline.py"
-}
-```
-
-次に `~/.claude/statusline.py` を作成します:
-
-```python
-import sys, json, time
-
-data = json.load(sys.stdin)
-
-rl = data.get('rate_limits', {})
-five_h = rl.get('five_hour')
-seven_d = rl.get('seven_day')
-if five_h or seven_d:
-    payload = {'updated_at': time.time()}
-    if five_h:
-        payload['five_hour'] = five_h
-    if seven_d:
-        payload['seven_d'] = seven_d
-    try:
-        with open('/tmp/gavel_ratelimits.json', 'w') as f:
-            json.dump(payload, f)
-    except Exception:
-        pass
-
-sessions = data.get('sessions', [])
-if sessions:
-    total = sum(s.get('total_cost_usd', 0) for s in sessions)
-    print(f"${total:.2f} today")
-```
 
 ### ライセンス
 
