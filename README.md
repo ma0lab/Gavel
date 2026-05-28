@@ -1,12 +1,14 @@
-# ClaudeBar
+# Gavel
 
 A macOS menu bar app that makes working with [Claude Code](https://claude.ai/code) more comfortable.
 
-![ClaudeBar screenshot](docs/screenshot.png)
+[![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/ma0lab)
+
+![Gavel screenshot](docs/screenshot.png)
 
 ## What it does
 
-Claude Code asks for permission before running tools like writing files, executing commands, or making web requests. By default you answer `y` or `n` in the terminal. ClaudeBar intercepts those requests and surfaces them in a native macOS UI — so you can approve or deny without switching focus, set up auto-allow rules for repetitive operations, and keep an eye on your rate limits from the menu bar.
+Claude Code asks for permission before running tools like writing files, executing commands, or making web requests. By default you answer `y` or `n` in the terminal. Gavel intercepts those requests and surfaces them in a native macOS UI — so you can approve or deny without switching focus, set up auto-allow rules for repetitive operations, and keep an eye on your rate limits from the menu bar.
 
 ## Features
 
@@ -46,16 +48,16 @@ Claude Code asks for permission before running tools like writing files, executi
 
 ## Installation
 
-1. Download `ClaudeBar.dmg` from the [latest release](https://github.com/ma0lab/ClaudeBar/releases/latest)
-2. Open the DMG and drag **ClaudeBar.app** to your Applications folder
-3. Launch ClaudeBar — it will appear in your menu bar as `>_`
+1. Download `Gavel.dmg` from the [latest release](https://github.com/ma0lab/Gavel/releases/latest)
+2. Open the DMG and drag **Gavel.app** to your Applications folder
+3. Launch Gavel — it will appear in your menu bar as `>_`
 4. Follow the in-app setup to connect it to Claude Code
 
-> **Gatekeeper note**: ClaudeBar is signed with a Developer ID certificate. If macOS still blocks it, go to System Settings → Privacy & Security → open anyway.
+> **Gatekeeper note**: Gavel is signed with a Developer ID certificate. If macOS still blocks it, go to System Settings → Privacy & Security → open anyway.
 
 ## Rate limit integration
 
-ClaudeBar reads rate limit data from Claude Code's [statusline API](https://docs.anthropic.com/en/docs/claude-code/settings#status-line-customization). To enable it, add this to your `~/.claude/settings.json`:
+Gavel reads rate limit data from Claude Code's [statusline API](https://docs.anthropic.com/en/docs/claude-code/settings#status-line-customization). To enable it, add this to your `~/.claude/settings.json`:
 
 ```json
 {
@@ -70,7 +72,7 @@ import sys, json, time
 
 data = json.load(sys.stdin)
 
-# Write rate limits for ClaudeBar
+# Write rate limits for Gavel
 rl = data.get('rate_limits', {})
 five_h = rl.get('five_hour')
 seven_d = rl.get('seven_day')
@@ -81,7 +83,7 @@ if five_h or seven_d:
     if seven_d:
         payload['seven_day'] = seven_d
     try:
-        with open('/tmp/claudebar_ratelimits.json', 'w') as f:
+        with open('/tmp/gavel_ratelimits.json', 'w') as f:
             json.dump(payload, f)
     except Exception:
         pass
@@ -96,9 +98,9 @@ if sessions:
 ## Building from source
 
 ```bash
-git clone https://github.com/ma0lab/ClaudeBar.git
-cd ClaudeBar
-make build        # builds to dist/ClaudeBar.app
+git clone https://github.com/ma0lab/Gavel.git
+cd Gavel
+make build        # builds to dist/Gavel.app
 make deploy       # builds + installs to /Applications + launches
 make dmg          # builds a distributable DMG
 ```
