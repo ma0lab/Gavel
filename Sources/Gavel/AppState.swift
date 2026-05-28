@@ -175,7 +175,7 @@ final class AppState: ObservableObject {
         guard !approvalQueue.isEmpty else { return }
         let approval = approvalQueue.removeFirst()
         ClLog.approval.info("deny: tool=\(approval.request.toolName ?? "?") reason='\(reason)'")
-        let text = reason.isEmpty ? "Denied via ClaudeBar" : reason
+        let text = reason.isEmpty ? "Denied via Gavel" : reason
         let response = HookResponse(decision: .deny, reason: text, requestId: approval.request.requestId)
         addActivity(from: approval.request, decision: .deny)
         approval.respond(response)

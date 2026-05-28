@@ -6,7 +6,7 @@ enum ClaudeSettingsError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .hookBinaryNotFound: return "claudebar-hook binary not found in app bundle"
+        case .hookBinaryNotFound: return "gavel-hook binary not found in app bundle"
         case .writeFailed: return "Failed to write ~/.claude/settings.json"
         }
     }
@@ -17,7 +17,7 @@ struct ClaudeSettingsManager {
         .appendingPathComponent(".claude/settings.json")
 
     static var hookBinaryPath: String? {
-        Bundle.main.url(forResource: "claudebar-hook", withExtension: nil)?.path
+        Bundle.main.url(forResource: "gavel-hook", withExtension: nil)?.path
     }
 
     static func isInstalled() -> Bool {
@@ -29,7 +29,7 @@ struct ClaudeSettingsManager {
             .flatMap { $0 }
             .contains { entry in
                 (entry["hooks"] as? [[String: Any]])?.contains { hook in
-                    (hook["command"] as? String)?.contains("claudebar-hook") == true
+                    (hook["command"] as? String)?.contains("gavel-hook") == true
                 } == true
             }
     }
@@ -74,7 +74,7 @@ struct ClaudeSettingsManager {
             if let entries = hooks[key] as? [[String: Any]] {
                 hooks[key] = entries.filter { entry in
                     (entry["hooks"] as? [[String: Any]])?.contains { hook in
-                        (hook["command"] as? String)?.contains("claudebar-hook") == true
+                        (hook["command"] as? String)?.contains("gavel-hook") == true
                     } != true
                 }
             }
@@ -95,7 +95,7 @@ struct ClaudeSettingsManager {
         // Always replace existing ClaudeBar entries so matcher stays in sync with app version
         let filtered = (existing ?? []).filter { entry in
             (entry["hooks"] as? [[String: Any]])?.contains { hook in
-                (hook["command"] as? String)?.contains("claudebar-hook") == true
+                (hook["command"] as? String)?.contains("gavel-hook") == true
             } != true
         }
         return filtered + [new]
@@ -106,7 +106,7 @@ struct ClaudeSettingsManager {
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
 
         let data = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
-        let tmpPath = settingsPath + ".claudebar.tmp"
+        let tmpPath = settingsPath + ".gavel.tmp"
 
         guard FileManager.default.createFile(atPath: tmpPath, contents: data) else {
             throw ClaudeSettingsError.writeFailed

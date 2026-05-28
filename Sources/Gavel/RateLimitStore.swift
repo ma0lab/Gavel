@@ -22,7 +22,7 @@ final class RateLimitStore: ObservableObject {
 
     @Published private(set) var data = RateLimitData()
 
-    private static let fileURL = URL(fileURLWithPath: "/tmp/claudebar_ratelimits.json")
+    private static let fileURL = URL(fileURLWithPath: "/tmp/gavel_ratelimits.json")
     private var timer: Timer?
 
     private init() {

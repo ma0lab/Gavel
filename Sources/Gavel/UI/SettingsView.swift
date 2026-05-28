@@ -14,7 +14,7 @@ struct SettingsView: View {
         Form {
             Section("Connection") {
                 LabeledContent("Socket") {
-                    Text("~/Library/Application Support/ClaudeBar/hook.sock")
+                    Text("~/Library/Application Support/Gavel/hook.sock")
                         .foregroundStyle(.secondary)
                         .font(.caption)
                 }
@@ -54,7 +54,7 @@ struct SettingsView: View {
             }
 
             Section("Keyboard Shortcuts") {
-                LabeledContent("Open ClaudeBar") {
+                LabeledContent("Open Gavel") {
                     Picker("", selection: Binding(
                         get: { state.commandPaletteShortcut },
                         set: { state.setCommandPaletteShortcut($0) }
@@ -79,13 +79,13 @@ struct SettingsView: View {
                         } else {
                             Button("Grant Access") {
                                 NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!)
-                                NSWorkspace.shared.selectFile("/Applications/ClaudeBar.app", inFileViewerRootedAtPath: "/Applications")
+                                NSWorkspace.shared.selectFile("/Applications/Gavel.app", inFileViewerRootedAtPath: "/Applications")
                             }
                         }
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Input Monitoring Required")
-                            Text("Click \"Grant Access\" — then drag ClaudeBar from the Finder window into the list.")
+                            Text("Click \"Grant Access\" — then drag Gavel from the Finder window into the list.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -355,7 +355,7 @@ struct SettingsView: View {
                     try? ClaudeSettingsManager.uninstall()
                     state.markSetupComplete()
                 }
-                dangerRow(title: "Quit ClaudeBar",
+                dangerRow(title: "Quit Gavel",
                           description: "アプリを終了します。メニューバーから再起動できます",
                           buttonLabel: "Quit") {
                     NSApplication.shared.terminate(nil)

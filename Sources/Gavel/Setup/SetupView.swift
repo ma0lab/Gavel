@@ -13,7 +13,7 @@ struct SetupView: View {
                 .foregroundColor(.accentColor)
 
             VStack(spacing: 8) {
-                Text("Connect ClaudeBar to Claude Code")
+                Text("Connect Gavel to Claude Code")
                     .font(.title2.bold())
                 Text("This will add hooks to ~/.claude/settings.json\nto intercept tool approvals.")
                     .font(.callout)

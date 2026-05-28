@@ -20,7 +20,7 @@ actor HookServer {
 
     static var socketPath: String {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first!.appendingPathComponent("ClaudeBar")
+            .first!.appendingPathComponent("Gavel")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("hook.sock").path
     }

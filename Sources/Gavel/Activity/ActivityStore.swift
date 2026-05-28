@@ -14,7 +14,7 @@ final class ActivityStore {
     private func open() {
         let dir = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("ClaudeBar")
+            .appendingPathComponent("Gavel")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let path = dir.appendingPathComponent("activity.db").path
         dbPath = path

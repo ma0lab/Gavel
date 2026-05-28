@@ -23,7 +23,7 @@ struct AboutView: View {
                 }
 
                 VStack(spacing: 6) {
-                    Text("ClaudeBar")
+                    Text("Gavel")
                         .font(.system(size: 20, weight: .bold))
                     Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")")
                         .font(.system(size: 11, weight: .medium))

@@ -4,7 +4,7 @@ import Darwin
 // Unix domain socket path (must match HookServer.socketPath)
 let socketPath: String = {
     let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-        .first!.appendingPathComponent("ClaudeBar/hook.sock").path
+        .first!.appendingPathComponent("Gavel/hook.sock").path
     return support
 }()
 
@@ -137,7 +137,7 @@ guard let responseObj = (try? JSONSerialization.jsonObject(with: responseData)) 
 }
 
 if decision == "deny" {
-    let reason = responseObj["reason"] as? String ?? "Denied via ClaudeBar"
+    let reason = responseObj["reason"] as? String ?? "Denied via Gavel"
     print(reason)
     exit(2)
 } else {

@@ -1,8 +1,8 @@
-APP     = ClaudeBar.app
+APP     = Gavel.app
 DIST    = dist/$(APP)
 DEST    = /Applications/$(APP)
 VERSION = $(shell /usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" Resources/Info.plist 2>/dev/null || echo "1.0")
-DMG     = dist/ClaudeBar-$(VERSION).dmg
+DMG     = dist/Gavel-$(VERSION).dmg
 
 .PHONY: build deploy run clean dmg
 
@@ -25,7 +25,7 @@ clean:
 dmg: build
 	rm -f "$(DMG)"
 	hdiutil create \
-		-volname "ClaudeBar" \
+		-volname "Gavel" \
 		-srcfolder "$(DIST)" \
 		-ov \
 		-format UDZO \

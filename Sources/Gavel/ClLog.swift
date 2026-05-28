@@ -1,7 +1,7 @@
 import OSLog
 import Foundation
 
-// ClLog — per-component logger backed by os.Logger + /tmp/claudebar.log
+// ClLog — per-component logger backed by os.Logger + /tmp/gavel.log
 //
 // Usage:
 //   private let log = ClLog("voice")
@@ -10,13 +10,13 @@ import Foundation
 //   log.error("whisper binary not found")
 //
 // Stream in Terminal:
-//   log stream --predicate 'subsystem == "com.maolab.ClaudeBar"' --level debug
+//   log stream --predicate 'subsystem == "com.maolab.Gavel"' --level debug
 //
 // Filter by category:
-//   log stream --predicate 'subsystem == "com.maolab.ClaudeBar" AND category == "voice"' --level debug
+//   log stream --predicate 'subsystem == "com.maolab.Gavel" AND category == "voice"' --level debug
 //
 // Tail file:
-//   tail -f /tmp/claudebar.log
+//   tail -f /tmp/gavel.log
 
 struct ClLog {
     let category: String
@@ -24,7 +24,7 @@ struct ClLog {
 
     init(_ category: String) {
         self.category = category
-        self.oslog = Logger(subsystem: "com.maolab.ClaudeBar", category: category)
+        self.oslog = Logger(subsystem: "com.maolab.Gavel", category: category)
     }
 
     func debug(_ msg: @autoclosure () -> String) { emit(msg(), level: "D") }
@@ -45,8 +45,8 @@ struct ClLog {
 
     // MARK: - File sink
 
-    private static let logURL = URL(fileURLWithPath: "/tmp/claudebar.log")
-    private static let queue = DispatchQueue(label: "com.maolab.ClaudeBar.log", qos: .utility)
+    private static let logURL = URL(fileURLWithPath: "/tmp/gavel.log")
+    private static let queue = DispatchQueue(label: "com.maolab.Gavel.log", qos: .utility)
     nonisolated(unsafe) private static var fileHandle: FileHandle? = {
         if !FileManager.default.fileExists(atPath: logURL.path) {
             FileManager.default.createFile(atPath: logURL.path, contents: nil)

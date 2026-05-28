@@ -25,7 +25,7 @@ final class VoiceInputService: ObservableObject {
 
     nonisolated static let whisperDirectory: URL = {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("ClaudeBar")
+            .appendingPathComponent("Gavel")
         return base.appendingPathComponent("Whisper")
     }()
 
@@ -38,7 +38,7 @@ final class VoiceInputService: ObservableObject {
         }
 
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("claudebar_recording_\(UUID().uuidString).wav")
+            .appendingPathComponent("gavel_recording_\(UUID().uuidString).wav")
         recordingURL = url
 
         let settings: [String: Any] = [

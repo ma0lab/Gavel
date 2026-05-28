@@ -2,24 +2,24 @@
 import PackageDescription
 
 let package = Package(
-    name: "ClaudeBar",
+    name: "Gavel",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "ClaudeBar", targets: ["ClaudeBar"]),
-        .executable(name: "claudebar-hook", targets: ["claudebar-hook"]),
+        .executable(name: "Gavel", targets: ["Gavel"]),
+        .executable(name: "gavel-hook", targets: ["gavel-hook"]),
     ],
     targets: [
         .executableTarget(
-            name: "ClaudeBar",
-            path: "Sources/ClaudeBar",
+            name: "Gavel",
+            path: "Sources/Gavel",
 swiftSettings: [
                 .unsafeFlags(["-enable-experimental-feature", "StrictConcurrency"])
             ],
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .executableTarget(
-            name: "claudebar-hook",
-            path: "Sources/claudebar-hook"
+            name: "gavel-hook",
+            path: "Sources/gavel-hook"
         ),
     ]
 )

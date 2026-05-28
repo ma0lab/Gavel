@@ -125,7 +125,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         guard let button = item.button else { return }
 
-        button.image = NSImage(systemSymbolName: "terminal.fill", accessibilityDescription: "ClaudeBar")
+        button.image = NSImage(systemSymbolName: "terminal.fill", accessibilityDescription: "Gavel")
         button.action = #selector(handleStatusBarClick)
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         button.target = self
@@ -208,8 +208,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Settings",       action: #selector(menuOpenSettings), keyEquivalent: "")
         menu.addItem(withTitle: "Activity Log",   action: #selector(menuOpenLog),      keyEquivalent: "")
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Restart ClaudeBar", action: #selector(menuRestart), keyEquivalent: "")
-        menu.addItem(withTitle: "Quit ClaudeBar",    action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.addItem(withTitle: "Restart Gavel", action: #selector(menuRestart), keyEquivalent: "")
+        menu.addItem(withTitle: "Quit Gavel",    action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.items.forEach { $0.target = self }
         // statusItem.menu を一時的にセットして表示後に nil に戻す（左クリックを維持するため）
         statusItem?.menu = menu
@@ -229,7 +229,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try process.run()
         } catch {
-            NSLog("[ClaudeBar] menuRestart failed: \(error)")
+            NSLog("[Gavel] menuRestart failed: \(error)")
             return
         }
         NSApp.terminate(nil)
@@ -265,7 +265,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func openMainWindow(tab: MainTab = .stats) {
         if mainWindow == nil {
-            let w = makeWindow(title: "ClaudeBar", size: NSSize(width: 640, height: 556))
+            let w = makeWindow(title: "Gavel", size: NSSize(width: 640, height: 556))
             w.contentView = NSHostingView(rootView: MainWindowView())
             mainWindow = w
         }
